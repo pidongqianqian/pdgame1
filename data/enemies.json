@@ -1,0 +1,34 @@
+{
+	"slime": {
+		"name": "史莱姆",
+		"max_hp": 15,
+		"attack": 4,
+		"speed": 35,
+		"gold": 3,
+		"souls": 1,
+		"description": "地牢中最常见的生物，软绵绵的身体却充满攻击性。"
+	},
+	"skeleton": {
+		"name": "骷髅兵",
+		"max_hp": 12,
+		"attack": 6,
+		"speed": 30,
+		"gold": 5,
+		"souls": 1,
+		"description": "被诅咒束缚的亡者，手持骨弓远程攻击入侵者。"
+	},
+	"boss_dark_knight": {
+		"name": "暗黑骑士",
+		"max_hp": 120,
+		"attack": 10,
+		"speed": 40,
+		"gold": 50,
+		"souls": 10,
+		"description": "深渊中的守护者，曾是伟大的骑士，如今被黑暗侵蚀。当生命值下降时会进入狂暴状态。",
+		"phases": [
+			{"hp_threshold": 1.0, "name": "Phase 1 - 稳重", "attack_mult": 1.0, "speed_mult": 1.0},
+			{"hp_threshold": 0.6, "name": "Phase 2 - 狂怒", "attack_mult": 1.4, "speed_mult": 1.25},
+			{"hp_threshold": 0.3, "name": "Phase 3 - 绝望", "attack_mult": 1.8, "speed_mult": 1.5}
+		]
+	}
+}

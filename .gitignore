@@ -1,0 +1,17 @@
+# Godot 4+ specific ignores
+.godot/
+*.import
+
+# Export
+export/
+*.pck
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*~

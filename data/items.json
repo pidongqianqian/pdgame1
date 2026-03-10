@@ -1,0 +1,29 @@
+{
+	"weapons": [
+		{"id": "sword_iron", "name": "铁剑", "base_attack": 5},
+		{"id": "sword_flame", "name": "炎剑", "base_attack": 8},
+		{"id": "sword_shadow", "name": "暗影刃", "base_attack": 12, "base_speed": 5},
+		{"id": "dagger_swift", "name": "疾风匕首", "base_attack": 4, "base_speed": 10},
+		{"id": "axe_heavy", "name": "重斧", "base_attack": 15, "base_speed": -5}
+	],
+	"armor": [
+		{"id": "armor_leather", "name": "皮甲", "base_defense": 5, "base_hp": 10},
+		{"id": "armor_plate", "name": "板甲", "base_defense": 12, "base_hp": 20, "base_speed": -5},
+		{"id": "armor_robe", "name": "法袍", "base_attack": 3, "base_defense": 2, "base_hp": 5, "base_speed": 3}
+	],
+	"helmets": [
+		{"id": "helm_iron", "name": "铁盔", "base_defense": 3, "base_hp": 5},
+		{"id": "helm_wisdom", "name": "智慧之冠", "base_attack": 2, "base_defense": 2, "base_hp": 10},
+		{"id": "helm_shadow", "name": "暗影兜帽", "base_defense": 1, "base_speed": 8}
+	],
+	"boots": [
+		{"id": "boots_iron", "name": "铁靴", "base_defense": 3, "base_speed": 5},
+		{"id": "boots_wind", "name": "风行靴", "base_defense": 1, "base_speed": 15},
+		{"id": "boots_heavy", "name": "重铁靴", "base_defense": 8, "base_hp": 5, "base_speed": -3}
+	],
+	"accessories": [
+		{"id": "ring_power", "name": "力量之戒", "base_attack": 5},
+		{"id": "ring_guard", "name": "守护之戒", "base_defense": 5, "base_hp": 15},
+		{"id": "amulet_luck", "name": "幸运护符", "base_attack": 2, "base_defense": 2, "base_hp": 5, "base_speed": 5}
+	]
+}

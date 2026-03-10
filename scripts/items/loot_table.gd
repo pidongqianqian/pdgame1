@@ -1,0 +1,63 @@
+extends Node
+
+const BASE_DROP_CHANCE = 0.4
+
+const RARITY_WEIGHTS = {
+	ItemDatabase.Rarity.COMMON: 60.0,
+	ItemDatabase.Rarity.UNCOMMON: 25.0,
+	ItemDatabase.Rarity.RARE: 10.0,
+	ItemDatabase.Rarity.EPIC: 4.0,
+	ItemDatabase.Rarity.LEGENDARY: 1.0,
+}
+
+
+func should_drop(is_boss: bool = false) -> bool:
+	var chance = BASE_DROP_CHANCE
+	if is_boss:
+		chance = 1.0
+	return randf() < chance
+
+
+func roll_rarity(luck_modifier: float = 1.0, is_boss: bool = false) -> ItemDatabase.Rarity:
+	var weights = RARITY_WEIGHTS.duplicate()
+	if luck_modifier > 1.0:
+		weights[ItemDatabase.Rarity.COMMON] *= (1.0 / luck_modifier)
+		weights[ItemDatabase.Rarity.UNCOMMON] *= luck_modifier
+		weights[ItemDatabase.Rarity.RARE] *= luck_modifier * 1.2
+		weights[ItemDatabase.Rarity.EPIC] *= luck_modifier * 1.5
+		weights[ItemDatabase.Rarity.LEGENDARY] *= luck_modifier * 2.0
+
+	if is_boss:
+		weights[ItemDatabase.Rarity.COMMON] *= 0.3
+		weights[ItemDatabase.Rarity.RARE] *= 2.0
+		weights[ItemDatabase.Rarity.EPIC] *= 3.0
+		weights[ItemDatabase.Rarity.LEGENDARY] *= 5.0
+
+	var total = 0.0
+	for w in weights.values():
+		total += w
+
+	var roll = randf() * total
+	var cumulative = 0.0
+	for rarity in weights:
+		cumulative += weights[rarity]
+		if roll <= cumulative:
+			return rarity
+
+	return ItemDatabase.Rarity.COMMON
+
+
+func generate_loot(is_boss: bool = false) -> Array[Dictionary]:
+	var drops: Array[Dictionary] = []
+	var luck = GameManager.get_luck_modifier()
+	var drop_count = 1
+	if is_boss:
+		drop_count = randi_range(2, 4)
+
+	for i in drop_count:
+		if should_drop(is_boss):
+			var rarity = roll_rarity(luck, is_boss)
+			var item = ItemDatabase.generate_item(rarity, GameManager.current_floor)
+			drops.append(item)
+
+	return drops
