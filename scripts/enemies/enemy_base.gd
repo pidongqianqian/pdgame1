@@ -17,10 +17,10 @@ enum AIState { IDLE, PATROL, CHASE, ATTACK, HURT, DEAD }
 @export var gold_reward: int = 5
 @export var xp_reward: int = 12
 
-const SEPARATION_RADIUS = 20.0
-const SEPARATION_FORCE = 120.0
-const PLAYER_MIN_DIST = 12.0
-const PLAYER_PUSH_FORCE = 140.0
+const SEPARATION_RADIUS = 16.0
+const SEPARATION_FORCE = 60.0
+const PLAYER_MIN_DIST = 8.0
+const PLAYER_PUSH_FORCE = 35.0
 
 var current_hp: int
 var ai_state: AIState = AIState.IDLE

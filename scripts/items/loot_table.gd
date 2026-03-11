@@ -1,6 +1,6 @@
 extends Node
 
-const BASE_DROP_CHANCE = 0.4
+const BASE_DROP_CHANCE = 0.15
 
 const RARITY_WEIGHTS = {
 	ItemDatabase.Rarity.COMMON: 60.0,

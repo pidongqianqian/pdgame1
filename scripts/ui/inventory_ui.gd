@@ -129,6 +129,34 @@ func _build_ui() -> void:
 	_next_btn.pressed.connect(func(): _change_page(1))
 	inv_header_row.add_child(_next_btn)
 
+	var sell_row = HBoxContainer.new()
+	sell_row.add_theme_constant_override("separation", 3)
+	inv_inner.add_child(sell_row)
+
+	var sell_common_btn = Button.new()
+	sell_common_btn.text = "卖白装"
+	sell_common_btn.custom_minimum_size = Vector2(50, 18)
+	UITheme.style_button(sell_common_btn, UITheme.FONT_SIZE_TINY)
+	sell_common_btn.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	sell_common_btn.pressed.connect(func(): _batch_sell(0))
+	sell_row.add_child(sell_common_btn)
+
+	var sell_green_btn = Button.new()
+	sell_green_btn.text = "卖绿装↓"
+	sell_green_btn.custom_minimum_size = Vector2(54, 18)
+	UITheme.style_button(sell_green_btn, UITheme.FONT_SIZE_TINY)
+	sell_green_btn.add_theme_color_override("font_color", Color(0.5, 0.9, 0.4))
+	sell_green_btn.pressed.connect(func(): _batch_sell(1))
+	sell_row.add_child(sell_green_btn)
+
+	var sell_blue_btn = Button.new()
+	sell_blue_btn.text = "卖蓝装↓"
+	sell_blue_btn.custom_minimum_size = Vector2(54, 18)
+	UITheme.style_button(sell_blue_btn, UITheme.FONT_SIZE_TINY)
+	sell_blue_btn.add_theme_color_override("font_color", Color(0.4, 0.6, 1.0))
+	sell_blue_btn.pressed.connect(func(): _batch_sell(2))
+	sell_row.add_child(sell_blue_btn)
+
 	_item_list = VBoxContainer.new()
 	_item_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_item_list.add_theme_constant_override("separation", 2)
@@ -270,7 +298,21 @@ func _create_item_button(item: Dictionary, is_inv: bool, index: int, slot_prefix
 		_is_inventory_item = is_inv
 		_show_detail(item, is_inv)
 	)
+	btn.mouse_entered.connect(func():
+		_show_detail(item, is_inv)
+	)
 	return btn
+
+
+func _format_diff(label: String, new_val: int, old_val: int) -> String:
+	var diff: int = new_val - old_val
+	if diff > 0:
+		return "%s+%d(↑%d)" % [label, new_val, diff]
+	elif diff < 0:
+		return "%s+%d(↓%d)" % [label, new_val, -diff]
+	elif new_val > 0:
+		return "%s+%d(=)" % [label, new_val]
+	return ""
 
 
 func _show_detail(item: Dictionary, is_inv: bool) -> void:
@@ -280,18 +322,40 @@ func _show_detail(item: Dictionary, is_inv: bool) -> void:
 	var color = item.get("color", Color.WHITE)
 
 	var lines: Array[String] = ["[%s] %s  (%s)" % [rarity_name, name_str, slot_name]]
-	var stats: Array[String] = []
-	if item.get("attack", 0) > 0:
-		stats.append("攻击+%d" % item["attack"])
-	if item.get("defense", 0) > 0:
-		stats.append("防御+%d" % item["defense"])
-	if item.get("hp", 0) > 0:
-		stats.append("生命+%d" % item["hp"])
-	var spd = item.get("speed", 0)
-	if spd != 0:
-		stats.append("速度%+d" % spd)
-	if not stats.is_empty():
-		lines.append("  ".join(stats))
+
+	var slot_id: int = item.get("slot", 0)
+	var equipped: Dictionary = {}
+	if _player and _player.stats.equipment.has(slot_id):
+		equipped = _player.stats.equipment[slot_id]
+
+	var has_compare: bool = is_inv and not equipped.is_empty() and equipped.get("uid", "") != item.get("uid", "")
+
+	if has_compare:
+		var parts: Array[String] = []
+		var d_atk = _format_diff("攻击", item.get("attack", 0), equipped.get("attack", 0))
+		var d_def = _format_diff("防御", item.get("defense", 0), equipped.get("defense", 0))
+		var d_hp = _format_diff("生命", item.get("hp", 0), equipped.get("hp", 0))
+		var d_spd = _format_diff("速度", item.get("speed", 0), equipped.get("speed", 0))
+		for s in [d_atk, d_def, d_hp, d_spd]:
+			if s != "":
+				parts.append(s)
+		if not parts.is_empty():
+			lines.append("  ".join(parts))
+		lines.append("对比: %s" % equipped.get("name", "???"))
+	else:
+		var stats: Array[String] = []
+		if item.get("attack", 0) > 0:
+			stats.append("攻击+%d" % item["attack"])
+		if item.get("defense", 0) > 0:
+			stats.append("防御+%d" % item["defense"])
+		if item.get("hp", 0) > 0:
+			stats.append("生命+%d" % item["hp"])
+		var spd = item.get("speed", 0)
+		if spd != 0:
+			stats.append("速度%+d" % spd)
+		if not stats.is_empty():
+			lines.append("  ".join(stats))
+
 	var sell_price: int = item.get("sell_price", 0)
 	lines.append("售价 %d 金" % sell_price)
 
@@ -376,6 +440,39 @@ func _show_sell_flash(amount: int) -> void:
 	tween.tween_property(flash, "position:y", flash.position.y - 18, 0.6)
 	tween.parallel().tween_property(flash, "modulate:a", 0.0, 0.6)
 	tween.tween_callback(flash.queue_free)
+
+
+func _batch_sell(max_rarity: int) -> void:
+	if not _player:
+		return
+	var to_sell: Array[Dictionary] = []
+	for item in _player.stats.inventory:
+		var r: int = item.get("rarity", 0)
+		if r <= max_rarity and item.get("type", "") != "skill_scroll":
+			to_sell.append(item)
+
+	if to_sell.is_empty():
+		_detail_label.text = "没有可出售的装备"
+		_detail_label.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+		return
+
+	var total_gold: int = 0
+	var count: int = to_sell.size()
+	for item in to_sell:
+		total_gold += item.get("sell_price", 0)
+		_player.stats.remove_from_inventory(item)
+	GameManager.add_gold(total_gold)
+
+	var rarity_label: String
+	match max_rarity:
+		0: rarity_label = "普通"
+		1: rarity_label = "精良及以下"
+		2: rarity_label = "稀有及以下"
+		_: rarity_label = "装备"
+	_detail_label.text = "已出售 %d 件%s装备，获得 %d 金" % [count, rarity_label, total_gold]
+	_detail_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	_show_sell_flash(total_gold)
+	_refresh()
 
 
 func _clear_actions() -> void:

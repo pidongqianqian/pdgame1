@@ -1,12 +1,76 @@
 extends Node2D
 
 const PlayerScene   = preload("res://scenes/player/player.tscn")
-const SlimeScene    = preload("res://scenes/enemies/enemy_slime.tscn")
-const SkeletonScene = preload("res://scenes/enemies/enemy_skeleton.tscn")
-const BossScene     = preload("res://scenes/enemies/boss_dark_knight.tscn")
 const LootDropScene = preload("res://scenes/items/loot_drop.tscn")
 const HUDScene      = preload("res://scenes/ui/hud.tscn")
 const InventoryScene = preload("res://scenes/ui/inventory_screen.tscn")
+
+enum DungeonTheme { CRYPT, FOREST, INFERNO, NECROPOLIS }
+
+const THEME_CONFIG = {
+	DungeonTheme.CRYPT: {
+		"name": "石窟深渊",
+		"enemies": [
+			preload("res://scenes/enemies/enemy_slime.tscn"),
+			preload("res://scenes/enemies/enemy_skeleton.tscn"),
+		],
+		"mini_bosses": [
+			preload("res://scenes/enemies/boss_giant_slime.tscn"),
+			preload("res://scenes/enemies/boss_skeleton_captain.tscn"),
+		],
+		"big_bosses": [
+			preload("res://scenes/enemies/boss_dark_knight.tscn"),
+		],
+		"ambience": Color(0.12, 0.08, 0.18),
+	},
+	DungeonTheme.FOREST: {
+		"name": "地下森林",
+		"enemies": [
+			preload("res://scenes/enemies/enemy_goblin.tscn"),
+			preload("res://scenes/enemies/enemy_mushroom.tscn"),
+			preload("res://scenes/enemies/enemy_plant.tscn"),
+		],
+		"mini_bosses": [
+			preload("res://scenes/enemies/boss_deer.tscn"),
+		],
+		"big_bosses": [
+			preload("res://scenes/enemies/boss_necromancer.tscn"),
+		],
+		"ambience": Color(0.06, 0.14, 0.08),
+	},
+	DungeonTheme.INFERNO: {
+		"name": "熔岩炼狱",
+		"enemies": [
+			preload("res://scenes/enemies/enemy_eye_monster.tscn"),
+			preload("res://scenes/enemies/enemy_skeleton.tscn"),
+			preload("res://scenes/enemies/enemy_goblin.tscn"),
+		],
+		"mini_bosses": [
+			preload("res://scenes/enemies/boss_giant_slime.tscn"),
+			preload("res://scenes/enemies/boss_skeleton_captain.tscn"),
+		],
+		"big_bosses": [
+			preload("res://scenes/enemies/boss_fire_elemental.tscn"),
+		],
+		"ambience": Color(0.18, 0.06, 0.04),
+	},
+	DungeonTheme.NECROPOLIS: {
+		"name": "亡灵殿堂",
+		"enemies": [
+			preload("res://scenes/enemies/enemy_skeleton.tscn"),
+			preload("res://scenes/enemies/enemy_eye_monster.tscn"),
+			preload("res://scenes/enemies/enemy_slime.tscn"),
+		],
+		"mini_bosses": [
+			preload("res://scenes/enemies/boss_skeleton_captain.tscn"),
+		],
+		"big_bosses": [
+			preload("res://scenes/enemies/boss_necromancer.tscn"),
+			preload("res://scenes/enemies/boss_dark_knight.tscn"),
+		],
+		"ambience": Color(0.10, 0.06, 0.16),
+	},
+}
 
 var dungeon: DungeonGenerator
 var player: Player
@@ -18,7 +82,7 @@ var enemies_alive: int = 0
 var _floor_clear_ui: CanvasLayer = null
 var _game_over_ui: CanvasLayer = null
 var _skill_select_ui: CanvasLayer = null
-
+var _skill_pts_btn: Button = null
 
 var _disconnect_ui: CanvasLayer = null
 
@@ -160,6 +224,12 @@ func _spawn_enemies() -> void:
 	# In multiplayer only host spawns enemies (all clients get identical enemies via RNG seed)
 	var is_host: bool = (not NetworkManager.is_multiplayer_active()) or multiplayer.is_server()
 
+	var is_big_boss_floor: bool = (GameManager.current_floor % 3 == 0)
+	var theme: DungeonTheme = _get_current_theme()
+	var config: Dictionary = THEME_CONFIG[theme]
+	var enemy_pool: Array = config["enemies"]
+	var floor_scale: float = 1.0 + (GameManager.current_floor - 1) * 0.12
+
 	for i in range(1, dungeon.rooms.size()):
 		var is_boss_room: bool = (i == dungeon.boss_room_index)
 		var base_count: int = randi_range(2 + player_count - 1, 3 + GameManager.current_floor + player_count - 1)
@@ -167,12 +237,13 @@ func _spawn_enemies() -> void:
 		dungeon.room_enemy_counts[i] = enemy_count
 
 		if is_boss_room:
-			var boss = BossScene.instantiate()
+			var boss: Node2D = _pick_boss_scene(is_big_boss_floor, config).instantiate()
 			boss.name = "Boss_Room_%d" % i
 			boss.position = dungeon.get_room_center(i)
 			boss.room_index = i
 			if hp_mult > 1.0:
-				boss.max_hp = int(boss.max_hp * hp_mult)
+				(boss as EnemyBase).max_hp = int((boss as EnemyBase).max_hp * hp_mult)
+			(boss as EnemyBase).max_hp = int((boss as EnemyBase).max_hp * floor_scale)
 			boss.died_in_room.connect(_on_enemy_died_in_room)
 			if is_host:
 				boss.set_multiplayer_authority(1)
@@ -180,14 +251,10 @@ func _spawn_enemies() -> void:
 			enemies_alive += 1
 		else:
 			for j in enemy_count:
-				var enemy: Node2D
-				if randf() > 0.5:
-					enemy = SlimeScene.instantiate()
-				else:
-					enemy = SkeletonScene.instantiate()
+				var scene: PackedScene = enemy_pool[randi() % enemy_pool.size()]
+				var enemy: Node2D = scene.instantiate()
 				enemy.name = "Enemy_%d_%d" % [i, j]
 				var epos: Vector2 = dungeon.get_random_position_in_room(i)
-				# 二次校验，确保位置落在地板上
 				if not dungeon.is_floor_at(epos):
 					epos = dungeon.get_room_center(i)
 				enemy.position = epos
@@ -199,6 +266,23 @@ func _spawn_enemies() -> void:
 					enemy.set_multiplayer_authority(1)
 				entities.add_child(enemy)
 				enemies_alive += 1
+
+
+func _get_current_theme() -> DungeonTheme:
+	var f: int = GameManager.current_floor
+	var block: int = ((f - 1) / 3) % 4
+	return block as DungeonTheme
+
+
+func _pick_boss_scene(is_big: bool, config: Dictionary) -> PackedScene:
+	if is_big:
+		var pool: Array = config["big_bosses"]
+		var idx: int = (GameManager.current_floor / 3 - 1) % pool.size()
+		return pool[idx]
+	else:
+		var pool: Array = config["mini_bosses"]
+		var idx: int = (GameManager.current_floor - 1) % pool.size()
+		return pool[idx]
 
 
 func _spawn_torch_lights() -> void:
@@ -249,6 +333,13 @@ func _setup_ambience() -> void:
 	ambience = CanvasLayer.new()
 	ambience.set_script(ambience_script)
 	add_child(ambience)
+	_apply_theme_ambience()
+
+
+func _apply_theme_ambience() -> void:
+	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
+	if ambience and ambience.has_method("set_theme"):
+		ambience.set_theme(config["ambience"])
 
 
 func _on_enemy_died_in_room(room_index: int, enemy_pos: Vector2, is_boss: bool, gold: int, xp: int = 12, killer_peer: int = 0) -> void:
@@ -311,27 +402,20 @@ func _apply_local_xp(amount: int) -> void:
 		player.stats.heal(kill_heal)
 	var leveled: bool = player.stats.add_xp(amount)
 	if leveled:
-		_show_level_up_select()
-
-
-func _show_level_up_select() -> void:
-	if _skill_select_ui:
-		return
-	var ui_script = load("res://scripts/ui/skill_select_ui.gd")
-	if not ui_script:
-		return
-	_skill_select_ui = CanvasLayer.new()
-	_skill_select_ui.set_script(ui_script)
-	_skill_select_ui.layer = 18
-	add_child(_skill_select_ui)
-	_skill_select_ui.setup_passive_select(player)
-	_skill_select_ui.selection_made.connect(_on_skill_selected)
+		player.stats.skill_points += 1
+		var hud_nodes = get_tree().get_nodes_in_group("hud")
+		if not hud_nodes.is_empty() and hud_nodes[0].has_method("show_pickup_text"):
+			hud_nodes[0].show_pickup_text(
+				"升级! Lv.%d  获得技能点×1" % player.stats.level,
+				UITheme.COLORS["text_gold"]
+			)
 
 
 func _on_skill_selected() -> void:
 	if _skill_select_ui:
 		_skill_select_ui.queue_free()
 		_skill_select_ui = null
+	_update_skill_pts_btn()
 
 
 func _try_spawn_loot(pos: Vector2, is_boss: bool) -> void:
@@ -382,7 +466,7 @@ func _show_floor_clear_ui() -> void:
 	# 整体容器（底部）
 	var root = VBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	root.offset_top = -148.0
+	root.offset_top = -155.0
 	root.add_theme_constant_override("separation", 0)
 	_floor_clear_ui.add_child(root)
 
@@ -450,20 +534,32 @@ func _show_floor_clear_ui() -> void:
 	hbox.add_child(msg)
 
 	var hint = Label.new()
-	hint.text = "捡装备、买东西，准备好再出发"
+	var cur_theme_cfg: Dictionary = THEME_CONFIG[_get_current_theme()]
+	var next_floor: int = GameManager.current_floor + 1
+	var next_theme_block: int = ((next_floor - 1) / 3) % 4
+	var next_theme_cfg: Dictionary = THEME_CONFIG[next_theme_block as DungeonTheme]
+	var theme_changed: bool = (next_theme_block != ((GameManager.current_floor - 1) / 3) % 4)
+	if theme_changed:
+		hint.text = "即将进入「%s」" % next_theme_cfg["name"]
+	else:
+		hint.text = "「%s」— 捡装备、买东西，准备好再出发" % cur_theme_cfg["name"]
 	hint.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_SMALL)
 	hint.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
 	hbox.add_child(hint)
 
-	var talent_btn = Button.new()
-	talent_btn.text = "  选择天赋  ✦"
-	talent_btn.custom_minimum_size = Vector2(100, 32)
-	UITheme.style_button(talent_btn, UITheme.FONT_SIZE_BODY)
-	talent_btn.add_theme_color_override("font_color", Color(0.6, 0.9, 0.4))
-	talent_btn.add_theme_stylebox_override("normal", _make_next_btn_style(false))
-	talent_btn.add_theme_stylebox_override("hover",  _make_next_btn_style(true))
-	talent_btn.pressed.connect(_on_floor_talent_select)
-	hbox.add_child(talent_btn)
+	# 技能点升级按钮
+	var sp: int = 0
+	if player and is_instance_valid(player):
+		sp = player.stats.skill_points
+	_skill_pts_btn = Button.new()
+	_skill_pts_btn.custom_minimum_size = Vector2(110, 32)
+	UITheme.style_button(_skill_pts_btn, UITheme.FONT_SIZE_BODY)
+	_skill_pts_btn.add_theme_stylebox_override("normal", _make_next_btn_style(false))
+	_skill_pts_btn.add_theme_stylebox_override("hover",  _make_next_btn_style(true))
+	_skill_pts_btn.add_theme_stylebox_override("disabled", _make_disabled_style())
+	_skill_pts_btn.pressed.connect(_on_spend_skill_point)
+	hbox.add_child(_skill_pts_btn)
+	_update_skill_pts_btn()
 
 	var btn = Button.new()
 	btn.text = "  进入第 %d 层  ▶" % (GameManager.current_floor + 1)
@@ -604,17 +700,36 @@ func _make_next_btn_style(hover: bool) -> StyleBoxFlat:
 	return sb
 
 
-func _on_floor_talent_select() -> void:
+func _update_skill_pts_btn() -> void:
+	if not _skill_pts_btn or not is_instance_valid(_skill_pts_btn):
+		return
+	var sp: int = 0
+	if player and is_instance_valid(player):
+		sp = player.stats.skill_points
+	if sp > 0:
+		_skill_pts_btn.text = "  升级天赋 (%d点)  ✦" % sp
+		_skill_pts_btn.disabled = false
+		_skill_pts_btn.add_theme_color_override("font_color", Color(0.6, 0.9, 0.4))
+	else:
+		_skill_pts_btn.text = "  无技能点  "
+		_skill_pts_btn.disabled = true
+		_skill_pts_btn.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+
+
+func _on_spend_skill_point() -> void:
 	if _skill_select_ui or not player or not is_instance_valid(player):
+		return
+	if player.stats.skill_points <= 0:
 		return
 	var ui_script = load("res://scripts/ui/skill_select_ui.gd")
 	if not ui_script:
 		return
+	player.stats.skill_points -= 1
 	_skill_select_ui = CanvasLayer.new()
 	_skill_select_ui.set_script(ui_script)
 	_skill_select_ui.layer = 18
 	add_child(_skill_select_ui)
-	_skill_select_ui.setup_floor_reward(player)
+	_skill_select_ui.setup_passive_select(player)
 	_skill_select_ui.selection_made.connect(_on_skill_selected)
 
 
@@ -646,6 +761,7 @@ func _rpc_advance_floor(new_floor: int) -> void:
 
 
 func _next_floor() -> void:
+	_skill_pts_btn = null
 	if ambience and ambience.has_method("clear_torches"):
 		ambience.clear_torches()
 
@@ -672,6 +788,7 @@ func _next_floor() -> void:
 	_spawn_player()
 	_spawn_enemies()
 	_spawn_torch_lights()
+	_show_theme_banner()
 
 	# 多人：复活死亡玩家（恢复 50% 血量）
 	if NetworkManager.is_multiplayer_active():
@@ -685,9 +802,7 @@ func _next_floor() -> void:
 					if p.get("stats") != null:
 						p.stats.heal(p.stats.max_hp / 2)
 
-	# 更新氛围色调
-	if ambience and ambience.has_method("_update_floor_theme"):
-		ambience._update_floor_theme()
+	_apply_theme_ambience()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1103,3 +1218,61 @@ func _show_toast(msg: String) -> void:
 	tw.tween_property(lbl, "modulate:a", 0.0, 0.5)
 	tw.parallel().tween_property(bg, "modulate:a", 0.0, 0.5)
 	tw.tween_callback(toast_layer.queue_free)
+
+
+var _last_theme_block: int = -1
+
+func _show_theme_banner() -> void:
+	var block: int = ((GameManager.current_floor - 1) / 3) % 4
+	if block == _last_theme_block and GameManager.current_floor > 1:
+		return
+	_last_theme_block = block
+
+	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
+	var theme_name: String = config["name"]
+	var floor_from: int = GameManager.current_floor
+	var floor_to: int = floor_from + (3 - ((floor_from - 1) % 3)) - 1
+
+	var layer = CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+
+	var panel = PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	panel.offset_top = 30
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(config["ambience"].r * 0.6, config["ambience"].g * 0.6, config["ambience"].b * 0.6, 0.92)
+	sb.border_color = Color(1.0, 0.85, 0.5, 0.7)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", sb)
+	layer.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 2)
+	panel.add_child(vbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "— %s —" % theme_name
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 14)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+	vbox.add_child(title_lbl)
+
+	var range_lbl = Label.new()
+	range_lbl.text = "第 %d ~ %d 层" % [floor_from, floor_to]
+	range_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	range_lbl.add_theme_font_size_override("font_size", 10)
+	range_lbl.add_theme_color_override("font_color", Color(0.8, 0.75, 0.6))
+	vbox.add_child(range_lbl)
+
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.8, 0.8)
+	var tw = create_tween()
+	tw.tween_property(panel, "modulate:a", 1.0, 0.4)
+	tw.parallel().tween_property(panel, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK)
+	tw.tween_interval(2.5)
+	tw.tween_property(panel, "modulate:a", 0.0, 0.6)
+	tw.tween_callback(layer.queue_free)

@@ -61,11 +61,7 @@ var _torch_positions: Array = []
 var _torch_sprites: Array = []
 var _floor_overlay: ColorRect
 
-const FLOOR_TINTS = {
-	1: Vector3(0.02, 0.01, 0.05),
-	3: Vector3(0.06, 0.01, 0.02),
-	5: Vector3(0.04, 0.01, 0.06),
-}
+var _theme_color: Color = Color(0.12, 0.08, 0.18)
 
 
 func _ready() -> void:
@@ -102,15 +98,23 @@ func _create_floor_overlay() -> void:
 	add_child(_floor_overlay)
 
 
+func set_theme(theme_color: Color) -> void:
+	_theme_color = theme_color
+	_update_floor_theme()
+
+	for d in _dust_nodes:
+		var node: ColorRect = d["node"]
+		node.color = Color(
+			_theme_color.r * 4 + 0.5,
+			_theme_color.g * 4 + 0.5,
+			_theme_color.b * 4 + 0.5,
+			node.color.a
+		)
+
+
 func _update_floor_theme() -> void:
 	var floor_num: int = GameManager.current_floor
-	var tint: Vector3
-	if floor_num >= 5:
-		tint = FLOOR_TINTS[5]
-	elif floor_num >= 3:
-		tint = FLOOR_TINTS[3]
-	else:
-		tint = FLOOR_TINTS[1]
+	var tint := Vector3(_theme_color.r, _theme_color.g, _theme_color.b)
 
 	if _fog_material:
 		_fog_material.set_shader_parameter("fog_tint", tint)

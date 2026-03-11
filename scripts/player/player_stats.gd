@@ -21,8 +21,9 @@ const MAX_INVENTORY_SIZE = 20
 
 var xp: int = 0
 var level: int = 1
-var learned_passives: Array = []   # ["crit", "crit", "swift"] — 同ID可重复表示叠加
-var passive_stacks: Dictionary = {} # {"crit": 2, "swift": 1}
+var skill_points: int = 0
+var learned_passives: Array = []
+var passive_stacks: Dictionary = {}
 
 # buff 系统（战吼等临时增益）
 var active_buffs: Array[Dictionary] = []  # [{"id": "warcry", "atk_bonus": ..., "def_bonus": ..., "timer": ...}]
@@ -43,6 +44,7 @@ func reset() -> void:
 	inventory = []
 	xp = 0
 	level = 1
+	skill_points = 0
 	learned_passives = []
 	passive_stacks = {}
 	active_buffs = []
