@@ -5,7 +5,7 @@ signal room_created(room: Dictionary)
 signal room_joined(room: Dictionary)
 signal request_failed(error: String)
 
-const DEFAULT_API_URL: String = ""
+const DEFAULT_API_URL: String = "http://106.14.75.44:8888"
 
 var api_url: String = DEFAULT_API_URL
 var current_room_code: String = ""
