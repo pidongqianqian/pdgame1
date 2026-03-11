@@ -5,6 +5,24 @@ signal selection_made
 var _player: Player
 var _options: Array = []
 var _mode: String = "passive"  # "passive" or "floor_reward"
+var _closed: bool = false
+
+
+func _process(_delta: float) -> void:
+	if _closed:
+		return
+	if not _player or not is_instance_valid(_player):
+		_force_close()
+		return
+	if _player.current_state == Player.State.DEAD:
+		_force_close()
+
+
+func _force_close() -> void:
+	_closed = true
+	if not NetworkManager.is_multiplayer_active():
+		get_tree().paused = false
+	selection_made.emit()
 
 
 func setup_passive_select(p: Player) -> void:
@@ -31,7 +49,8 @@ func setup_floor_reward(p: Player) -> void:
 
 func _build_ui() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	get_tree().paused = true
+	if not NetworkManager.is_multiplayer_active():
+		get_tree().paused = true
 
 	# 半透明遮罩
 	var overlay = ColorRect.new()
@@ -146,13 +165,13 @@ func _create_option_card(option_id: String) -> PanelContainer:
 
 func _on_option_selected(option_id: String) -> void:
 	if not _player or not is_instance_valid(_player):
-		get_tree().paused = false
+		if not NetworkManager.is_multiplayer_active():
+			get_tree().paused = false
 		selection_made.emit()
 		return
 
 	_player.stats.learn_passive(option_id)
 
-	# 显示获得提示
 	var data: Dictionary = SkillDatabase.PASSIVE_TALENTS[option_id]
 	var hud_nodes = get_tree().get_nodes_in_group("hud")
 	if not hud_nodes.is_empty() and hud_nodes[0].has_method("show_pickup_text"):
@@ -161,7 +180,8 @@ func _on_option_selected(option_id: String) -> void:
 			UITheme.COLORS["text_gold"]
 		)
 
-	get_tree().paused = false
+	if not NetworkManager.is_multiplayer_active():
+		get_tree().paused = false
 	selection_made.emit()
 
 

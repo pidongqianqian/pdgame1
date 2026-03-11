@@ -119,7 +119,11 @@ func host_start_game() -> void:
 		return
 	_dead_peers.clear()
 	current_dungeon_seed = randi()
-	_rpc_start_game.rpc(current_dungeon_seed)
+	# Send full player_info to ensure all clients have identical data at start
+	var info_snapshot: Dictionary = {}
+	for pid in player_info:
+		info_snapshot[pid] = player_info[pid].duplicate()
+	_rpc_start_game.rpc(current_dungeon_seed, info_snapshot)
 
 
 func register_player_death(peer_id: int) -> void:
@@ -219,6 +223,7 @@ func _rpc_update_ready(peer_id: int, rdy: bool) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func _rpc_start_game(seed_val: int) -> void:
+func _rpc_start_game(seed_val: int, info_snapshot: Dictionary) -> void:
 	current_dungeon_seed = seed_val
+	player_info = info_snapshot
 	game_start_requested.emit()

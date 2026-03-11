@@ -247,12 +247,12 @@ func _setup_ambience() -> void:
 	add_child(ambience)
 
 
-func _on_enemy_died_in_room(room_index: int, enemy_pos: Vector2, is_boss: bool, gold: int, xp: int = 12) -> void:
+func _on_enemy_died_in_room(room_index: int, enemy_pos: Vector2, is_boss: bool, gold: int, xp: int = 12, killer_peer: int = 0) -> void:
 	enemies_alive -= 1
 	dungeon.on_enemy_killed_in_room(room_index)
 	_try_spawn_loot(enemy_pos, is_boss)
 	_spawn_gold_coins(enemy_pos, gold, is_boss)
-	_grant_xp(xp)
+	_grant_xp(xp, killer_peer)
 
 
 func _spawn_gold_coins(pos: Vector2, total_gold: int, is_boss: bool) -> void:
@@ -281,14 +281,13 @@ func _spawn_gold_coins(pos: Vector2, total_gold: int, is_boss: bool) -> void:
 		entities.add_child(coin)
 
 
-func _grant_xp(amount: int) -> void:
+func _grant_xp(amount: int, killer_peer: int = 0) -> void:
 	if NetworkManager.is_multiplayer_active():
-		# Host 给所有存活玩家分发 XP
 		if multiplayer.is_server():
-			for peer_id in GameManager.player_nodes:
-				var p: Node2D = GameManager.player_nodes[peer_id]
+			if killer_peer > 0 and GameManager.player_nodes.has(killer_peer):
+				var p: Node2D = GameManager.player_nodes[killer_peer]
 				if p and is_instance_valid(p) and (p as Player).current_state != Player.State.DEAD:
-					_rpc_grant_xp.rpc_id(peer_id, amount)
+					_rpc_grant_xp.rpc_id(killer_peer, amount)
 		return
 	_apply_local_xp(amount)
 
@@ -344,8 +343,9 @@ func _try_spawn_loot(pos: Vector2, is_boss: bool) -> void:
 
 func _on_all_rooms_cleared() -> void:
 	await get_tree().create_timer(0.8).timeout
-	if NetworkManager.is_multiplayer_active() and multiplayer.is_server():
-		_rpc_show_floor_clear.rpc()
+	if NetworkManager.is_multiplayer_active():
+		if multiplayer.is_server():
+			_rpc_show_floor_clear.rpc()
 	else:
 		_show_floor_clear_ui()
 
@@ -691,11 +691,10 @@ func _next_floor() -> void:
 # ═══════════════════════════════════════════════════════════════
 
 func _on_game_over() -> void:
-	# 死亡时关闭可能存在的升级选择弹窗
-	if _skill_select_ui:
-		get_tree().paused = false
+	if _skill_select_ui and is_instance_valid(_skill_select_ui):
 		_skill_select_ui.queue_free()
 		_skill_select_ui = null
+	get_tree().paused = false
 	await get_tree().create_timer(1.2).timeout
 	_show_game_over_ui()
 

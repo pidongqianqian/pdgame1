@@ -25,10 +25,17 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if ai_state == AIState.DEAD:
+		return
+	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
+		_remote_enemy_process(delta)
+		return
+
 	_update_phase()
 	if _is_charging:
 		_process_charge(delta)
 		move_and_slide()
+		_broadcast_sync(delta)
 		return
 	super._physics_process(delta)
 
@@ -86,6 +93,8 @@ func _start_charge() -> void:
 
 
 func _process_charge(_delta: float) -> void:
+	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
+		return
 	var bodies = hitbox.get_overlapping_bodies() if hitbox else []
 	for body in bodies:
 		if body is Player:

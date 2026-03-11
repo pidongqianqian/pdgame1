@@ -1,7 +1,7 @@
 extends CharacterBody2D
 class_name EnemyBase
 
-signal died_in_room(room_index: int, pos: Vector2, is_boss: bool, gold: int, xp_reward: int)
+signal died_in_room(room_index: int, pos: Vector2, is_boss: bool, gold: int, xp_reward: int, killer_peer: int)
 
 enum AIState { IDLE, PATROL, CHASE, ATTACK, HURT, DEAD }
 
@@ -27,6 +27,7 @@ var ai_state: AIState = AIState.IDLE
 var room_index: int = -1
 var target: Node2D = null
 
+var _last_attacker_peer: int = 0
 var _attack_cd_timer: float = 0.0
 var _patrol_direction: Vector2 = Vector2.ZERO
 var _patrol_timer: float = 0.0
@@ -39,6 +40,11 @@ var _slow_timer: float = 0.0
 var _slow_percent: float = 0.0
 var _is_frozen: bool = false
 
+# Multiplayer sync
+var _sync_timer: float = 0.0
+const ENEMY_SYNC_INTERVAL: float = 1.0 / 15.0
+var _remote_target_pos: Vector2 = Vector2.ZERO
+
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hitbox: Area2D = $Hitbox
 @onready var collision: CollisionShape2D = $CollisionShape2D
@@ -47,6 +53,7 @@ var _is_frozen: bool = false
 func _ready() -> void:
 	current_hp = max_hp
 	_idle_timer = randf_range(0.5, 2.0)
+	_remote_target_pos = global_position
 	add_to_group("enemies")
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
@@ -55,15 +62,14 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if ai_state == AIState.DEAD:
 		return
-	# 多人模式下只有 Host (peer_id=1) 运行 AI
 	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
+		_remote_enemy_process(delta)
 		return
 	_update_debuffs(delta)
 	if _is_frozen:
 		velocity = Vector2.ZERO
 		move_and_slide()
-		if NetworkManager.is_multiplayer_active():
-			_rpc_sync_pos.rpc(global_position, int(ai_state))
+		_broadcast_sync(delta)
 		return
 	_update_timers(delta)
 	_find_target()
@@ -81,13 +87,26 @@ func _physics_process(delta: float) -> void:
 
 	var sep = _get_separation_force()
 	velocity += sep
-	# 减速效果
 	if _slow_timer > 0.0:
 		velocity *= (1.0 - _slow_percent)
 	move_and_slide()
+	_broadcast_sync(delta)
 
-	# Host 每帧广播位置给所有客户端
-	if NetworkManager.is_multiplayer_active():
+
+func _remote_enemy_process(delta: float) -> void:
+	global_position = global_position.lerp(_remote_target_pos, 15.0 * delta)
+	if _remote_target_pos.x < global_position.x - 0.1:
+		sprite.flip_h = true
+	elif _remote_target_pos.x > global_position.x + 0.1:
+		sprite.flip_h = false
+
+
+func _broadcast_sync(delta: float) -> void:
+	if not NetworkManager.is_multiplayer_active():
+		return
+	_sync_timer += delta
+	if _sync_timer >= ENEMY_SYNC_INTERVAL:
+		_sync_timer = 0.0
 		_rpc_sync_pos.rpc(global_position, int(ai_state))
 
 
@@ -121,7 +140,6 @@ func _update_timers(delta: float) -> void:
 
 func _find_target() -> void:
 	if NetworkManager.is_multiplayer_active():
-		# 找最近的存活玩家
 		var nearest: Node2D = null
 		var nearest_dist: float = INF
 		for peer_id in GameManager.player_nodes:
@@ -130,6 +148,8 @@ func _find_target() -> void:
 				continue
 			if (p as Player).current_state == Player.State.DEAD:
 				continue
+			if (p as Player).is_invisible:
+				continue
 			var d: float = global_position.distance_to(p.global_position)
 			if d < nearest_dist:
 				nearest_dist = d
@@ -137,6 +157,10 @@ func _find_target() -> void:
 		target = nearest
 	else:
 		if not GameManager.player_node or not is_instance_valid(GameManager.player_node):
+			target = null
+			return
+		var pl: Player = GameManager.player_node as Player
+		if pl.is_invisible:
 			target = null
 			return
 		target = GameManager.player_node
@@ -230,10 +254,19 @@ func _state_hurt(delta: float) -> void:
 func take_damage(amount: int, from_dir: Vector2 = Vector2.ZERO) -> void:
 	if ai_state == AIState.DEAD:
 		return
-	# 多人模式下只有 Host 处理伤害
 	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
 		_rpc_request_damage.rpc_id(1, amount, from_dir)
+		_show_damage_number(amount)
+		_flash_white()
 		return
+	var attacker: int = multiplayer.get_unique_id() if NetworkManager.is_multiplayer_active() else 0
+	_apply_host_damage(amount, from_dir, attacker)
+
+
+func _apply_host_damage(amount: int, from_dir: Vector2, attacker_peer: int) -> void:
+	if ai_state == AIState.DEAD:
+		return
+	_last_attacker_peer = attacker_peer
 	current_hp -= amount
 	_show_damage_number(amount)
 	if current_hp <= 0:
@@ -254,12 +287,13 @@ func take_damage(amount: int, from_dir: Vector2 = Vector2.ZERO) -> void:
 func _rpc_request_damage(amount: int, from_dir: Vector2) -> void:
 	if not multiplayer.is_server():
 		return
-	take_damage(amount, from_dir)
+	var sender: int = multiplayer.get_remote_sender_id()
+	_apply_host_damage(amount, from_dir, sender)
 
 
 @rpc("authority", "call_remote", "unreliable")
 func _rpc_sync_pos(pos: Vector2, state: int) -> void:
-	global_position = pos
+	_remote_target_pos = pos
 	ai_state = state as AIState
 
 
@@ -272,13 +306,33 @@ func _die() -> void:
 		hitbox.set_deferred("monitorable", false)
 	GameManager.add_souls(soul_reward)
 	var xp: int = xp_reward if not is_boss else randi_range(50, 80)
-	died_in_room.emit(room_index, global_position, is_boss, gold_reward, xp)
+	died_in_room.emit(room_index, global_position, is_boss, gold_reward, xp, _last_attacker_peer)
 
+	if NetworkManager.is_multiplayer_active() and multiplayer.is_server():
+		_rpc_remote_die.rpc()
+
+	_play_death_anim()
+
+
+func _play_death_anim() -> void:
 	var tween = create_tween()
 	tween.tween_property(sprite, "modulate", Color(1, 0.3, 0.3, 1), 0.1)
 	tween.tween_property(sprite, "scale", Vector2(1.2, 0.3), 0.15)
 	tween.parallel().tween_property(sprite, "modulate:a", 0.0, 0.3)
 	tween.tween_callback(queue_free)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_remote_die() -> void:
+	if ai_state == AIState.DEAD:
+		return
+	ai_state = AIState.DEAD
+	velocity = Vector2.ZERO
+	collision.set_deferred("disabled", true)
+	if hitbox:
+		hitbox.set_deferred("monitoring", false)
+		hitbox.set_deferred("monitorable", false)
+	_play_death_anim()
 
 
 func _flash_white() -> void:
@@ -339,5 +393,7 @@ func apply_slow(duration: float, percent: float = 0.5) -> void:
 
 func _on_hitbox_body_entered(body: Node2D) -> void:
 	if body is Player and ai_state != AIState.DEAD:
+		if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
+			return
 		var dir = global_position.direction_to(body.global_position)
 		(body as Player).take_damage(attack_power, dir)

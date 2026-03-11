@@ -19,11 +19,11 @@ func execute(player: Player, data: Dictionary) -> void:
 	global_position = player.global_position
 	_create_smoke_visual()
 
-	# 玩家隐身
+	# 隐身：敌人AI无法锁定玩家
+	player.is_invisible = true
 	var tween = player.create_tween()
 	tween.tween_property(player.sprite, "modulate:a", 0.2, 0.15)
 
-	# 立即减速范围内敌人
 	_apply_slow_nearby()
 
 
@@ -54,6 +54,7 @@ func _apply_slow_nearby() -> void:
 
 func _end_effect() -> void:
 	if _player and is_instance_valid(_player):
+		_player.is_invisible = false
 		var tween = _player.create_tween()
 		tween.tween_property(_player.sprite, "modulate:a", 1.0, 0.3)
 

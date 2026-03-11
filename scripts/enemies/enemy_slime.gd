@@ -19,6 +19,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
+	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
+		return
 	_jump_timer -= delta
 	if _jump_timer <= 0 and ai_state == AIState.CHASE:
 		_jump_timer = randf_range(1.0, 2.0)

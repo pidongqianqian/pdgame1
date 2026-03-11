@@ -10,6 +10,7 @@ enum State { IDLE, MOVE, ATTACK, DODGE, HURT, DEAD }
 var current_state: State = State.IDLE
 var facing_direction: Vector2 = Vector2.DOWN
 var is_invincible: bool = false
+var is_invisible: bool = false
 
 var _dodge_timer: float = 0.0
 var _dodge_cooldown_timer: float = 0.0
@@ -40,30 +41,41 @@ var skill_manager: SkillManager
 
 var initial_class: int = -1  # 多人模式下由 game_world 指定
 
+var _is_local: bool = true
+var _sync_timer: float = 0.0
+const SYNC_INTERVAL: float = 1.0 / 20.0  # 20 Hz
+
+# Remote interpolation
+var _remote_target_pos: Vector2 = Vector2.ZERO
+var _remote_target_dir: Vector2 = Vector2.DOWN
+var _remote_state: int = State.IDLE
+
 
 func _ready() -> void:
 	if not stats:
 		stats = PlayerStats.new()
 
-	# 多人模式：使用对应 peer 的职业；否则使用本地选择职业
 	if NetworkManager.is_multiplayer_active():
+		_is_local = is_multiplayer_authority()
 		var my_authority: int = get_multiplayer_authority()
 		var cls: int = NetworkManager.player_info.get(my_authority, {}).get("class", GameManager.current_class)
 		if initial_class >= 0:
 			cls = initial_class
-		GameManager.current_class = cls
+		else:
+			initial_class = cls
+		if _is_local:
+			GameManager.current_class = cls
+		camera.enabled = _is_local
+		_remote_target_pos = global_position
+	else:
+		if initial_class < 0:
+			initial_class = GameManager.current_class
+		GameManager.player_node = self
+
 	stats.reset()
 	stats.died.connect(_on_died)
 	attack_area.monitoring = false
 	attack_shape.disabled = true
-
-	if NetworkManager.is_multiplayer_active():
-		# 只有本地玩家才启用摄像头和键盘输入
-		camera.enabled = is_multiplayer_authority()
-		if not is_multiplayer_authority():
-			set_physics_process(false)
-	else:
-		GameManager.player_node = self
 
 	_load_textures()
 	_apply_class_visuals()
@@ -71,15 +83,19 @@ func _ready() -> void:
 	_setup_skill_manager()
 
 
+func _get_class() -> int:
+	return initial_class if initial_class >= 0 else GameManager.current_class
+
+
 func _apply_class_visuals() -> void:
-	var cd = GameManager.CLASS_DATA[GameManager.current_class]
+	var cd = GameManager.CLASS_DATA[_get_class()]
 	_class_color = cd["color"]
 	sprite.modulate = Color.WHITE
 
 
 
 func _load_textures() -> void:
-	var cls: int = GameManager.current_class
+	var cls: int = _get_class()
 	var path_map: Dictionary = {
 		GameManager.PlayerClass.WARRIOR: "res://assets/sprites/player/warrior.png",
 		GameManager.PlayerClass.MAGE:    "res://assets/sprites/player/mage.png",
@@ -101,7 +117,7 @@ func _create_weapon_sprite() -> void:
 		GameManager.PlayerClass.RANGER:  "res://assets/sprites/items/bow.png",
 		GameManager.PlayerClass.ROGUE:   "res://assets/sprites/items/dagger.png",
 	}
-	var tex_path: String = weapon_map.get(GameManager.current_class, "res://assets/sprites/items/sword_icon.png")
+	var tex_path: String = weapon_map.get(_get_class(), "res://assets/sprites/items/sword_icon.png")
 	var tex = load(tex_path)
 	if tex:
 		_weapon_sprite.texture = tex
@@ -132,17 +148,110 @@ func _check_skill_input() -> void:
 				_rpc_broadcast_skill.rpc(SkillDatabase.SkillSlot.SKILL_L, global_position, facing_direction)
 
 
+func _remote_process(delta: float) -> void:
+	global_position = global_position.lerp(_remote_target_pos, 15.0 * delta)
+	facing_direction = _remote_target_dir
+	var prev_state: int = current_state
+	current_state = _remote_state as State
+
+	_update_weapon_transform()
+	_update_sprite_direction()
+
+	if current_state == State.MOVE:
+		_walk_anim_timer += delta
+		var bob: float = sin(_walk_anim_timer / WALK_ANIM_SPEED * PI) * 1.5
+		sprite.position.y = -abs(bob)
+		sprite.scale.x = 1.0 + sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
+		sprite.scale.y = 1.0 - sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
+	elif current_state == State.IDLE:
+		sprite.position = Vector2.ZERO
+		sprite.scale = Vector2.ONE
+		_walk_anim_timer = 0.0
+	elif current_state == State.DEAD:
+		if prev_state != State.DEAD:
+			sprite.modulate = Color(0.5, 0.1, 0.1, 0.3)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _rpc_sync_pos(pos: Vector2, dir: Vector2, state: int) -> void:
+	_remote_target_pos = pos
+	_remote_target_dir = dir
+	_remote_state = state
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func _rpc_broadcast_skill(slot: int, pos: Vector2, dir: Vector2) -> void:
 	global_position = pos
+	_remote_target_pos = pos
 	facing_direction = dir
 	if skill_manager:
-		var peer_cls: int = initial_class if initial_class >= 0 else GameManager.current_class
+		var peer_cls: int = _get_class()
 		var skill_id: String = SkillDatabase.get_skill_for_slot(peer_cls, slot)
 		if skill_id == "":
 			return
 		var data: Dictionary = SkillDatabase.ACTIVE_SKILLS[skill_id]
 		skill_manager._execute_skill(skill_id, data)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_broadcast_attack(pos: Vector2, dir: Vector2) -> void:
+	global_position = pos
+	_remote_target_pos = pos
+	facing_direction = dir
+	_update_sprite_direction()
+	_play_remote_attack_effects()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_broadcast_dodge(pos: Vector2, dir: Vector2) -> void:
+	global_position = pos
+	_remote_target_pos = pos
+	facing_direction = dir
+	_update_sprite_direction()
+	_spawn_dodge_afterimage(_class_color)
+
+
+func _play_remote_attack_effects() -> void:
+	match _get_class():
+		GameManager.PlayerClass.WARRIOR:
+			_spawn_warrior_slash()
+			_animate_weapon_swing(0.3, 120.0)
+			var tw = create_tween()
+			tw.tween_property(sprite, "position", facing_direction * 3.0, 0.06)
+			tw.tween_property(sprite, "position", Vector2.ZERO, 0.12)
+		GameManager.PlayerClass.MAGE:
+			_animate_weapon_thrust(0.2)
+			var tw = create_tween()
+			tw.tween_property(sprite, "scale", Vector2(1.2, 1.2), 0.06)
+			tw.tween_property(sprite, "scale", Vector2(1.0, 1.0), 0.08)
+			_spawn_remote_projectile(facing_direction, Color(0.5, 0.3, 1.0, 0.9), 90.0)
+		GameManager.PlayerClass.RANGER:
+			_animate_weapon_thrust(0.18)
+			var tw = create_tween()
+			tw.tween_property(sprite, "position", -facing_direction * 1.5, 0.05)
+			tw.tween_property(sprite, "position", Vector2.ZERO, 0.08)
+			_spawn_remote_projectile(facing_direction, Color(0.9, 0.8, 0.5, 0.9), 130.0)
+		GameManager.PlayerClass.ROGUE:
+			var left_offset = Vector2(-facing_direction.y, facing_direction.x) * 5
+			_spawn_rogue_slash(left_offset, Color(1.0, 0.6, 0.2))
+			_animate_weapon_swing(0.12, 80.0)
+
+
+func _spawn_remote_projectile(dir: Vector2, color: Color, speed: float) -> void:
+	var proj = Node2D.new()
+	var visual = ColorRect.new()
+	visual.size = Vector2(6, 4)
+	visual.position = Vector2(-3, -2)
+	visual.rotation = dir.angle()
+	visual.color = color
+	proj.add_child(visual)
+	proj.global_position = global_position + dir * 10
+	get_parent().add_child(proj)
+	var duration: float = 100.0 / speed
+	var tw = create_tween()
+	tw.tween_property(proj, "global_position", proj.global_position + dir * 100, duration)
+	tw.parallel().tween_property(visual, "modulate:a", 0.0, duration)
+	tw.tween_callback(proj.queue_free)
 
 
 func _update_weapon_transform() -> void:
@@ -153,7 +262,7 @@ func _update_weapon_transform() -> void:
 		return
 	_weapon_sprite.visible = true
 
-	var cls: int = GameManager.current_class
+	var cls: int = _get_class()
 	var offset: Vector2
 	var rot: float
 
@@ -189,6 +298,10 @@ func _update_weapon_transform() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if NetworkManager.is_multiplayer_active() and not _is_local:
+		_remote_process(delta)
+		return
+
 	_update_timers(delta)
 	_update_weapon_transform()
 	match current_state:
@@ -198,13 +311,19 @@ func _physics_process(delta: float) -> void:
 		State.DODGE:  _state_dodge(delta)
 		State.HURT:   _state_hurt(delta)
 		State.DEAD:
-			if NetworkManager.is_multiplayer_active() and is_multiplayer_authority():
+			if NetworkManager.is_multiplayer_active() and _is_local:
 				var dir = _get_input_direction()
 				velocity = dir * stats.speed * 0.6
 				move_and_slide()
 			return
 	_update_invincibility(delta)
 	move_and_slide()
+
+	if NetworkManager.is_multiplayer_active() and _is_local:
+		_sync_timer += delta
+		if _sync_timer >= SYNC_INTERVAL:
+			_sync_timer = 0.0
+			_rpc_sync_pos.rpc(global_position, facing_direction, current_state)
 
 
 func _update_timers(delta: float) -> void:
@@ -253,7 +372,7 @@ func _state_move(delta: float) -> void:
 	facing_direction = dir
 
 	# 游侠攻击时不停步
-	var cls = GameManager.current_class
+	var cls = _get_class()
 	if cls == GameManager.PlayerClass.RANGER and Input.is_action_just_pressed("attack") and _attack_cooldown_timer <= 0:
 		velocity = dir * stats.get_total_speed()
 		_start_attack()
@@ -283,7 +402,12 @@ func _state_move(delta: float) -> void:
 # ═══════════════════════════════════════════════════════════════
 
 func _start_attack() -> void:
-	match GameManager.current_class:
+	if is_invisible:
+		is_invisible = false
+		sprite.modulate.a = 1.0
+	if NetworkManager.is_multiplayer_active() and _is_local:
+		_rpc_broadcast_attack.rpc(global_position, facing_direction)
+	match _get_class():
 		GameManager.PlayerClass.WARRIOR: _attack_warrior()
 		GameManager.PlayerClass.MAGE:    _attack_mage()
 		GameManager.PlayerClass.RANGER:  _attack_ranger()
@@ -449,7 +573,7 @@ func _deal_attack_damage(dmg: int, knockback_mult: float = 1.0) -> void:
 			if crit:
 				_show_crit_text(body.global_position)
 			hit_any = true
-	if hit_any and GameManager.current_class != GameManager.PlayerClass.ROGUE:
+	if hit_any and _get_class() != GameManager.PlayerClass.ROGUE:
 		_camera_shake(2.0, 0.12)
 		_freeze_frame(0.04)
 
@@ -487,7 +611,9 @@ func _state_attack(delta: float) -> void:
 # ═══════════════════════════════════════════════════════════════
 
 func _start_dodge() -> void:
-	match GameManager.current_class:
+	if NetworkManager.is_multiplayer_active() and _is_local:
+		_rpc_broadcast_dodge.rpc(global_position, facing_direction)
+	match _get_class():
 		GameManager.PlayerClass.WARRIOR: _dodge_warrior()
 		GameManager.PlayerClass.MAGE:    _dodge_mage()
 		GameManager.PlayerClass.RANGER:  _dodge_ranger()
@@ -606,7 +732,7 @@ func _state_dodge(delta: float) -> void:
 		sprite.modulate = Color.WHITE
 		current_state = State.IDLE
 		# 游侠/战士保持部分速度
-		if GameManager.current_class == GameManager.PlayerClass.RANGER:
+		if _get_class() == GameManager.PlayerClass.RANGER:
 			velocity *= 0.3
 
 
