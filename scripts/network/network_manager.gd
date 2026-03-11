@@ -15,6 +15,7 @@ const MAX_PLAYERS: int = 4
 # peer_id -> { "class": int, "ready": bool }
 var player_info: Dictionary = {}
 var is_hosting: bool = false
+var is_cloud_room: bool = false
 var current_dungeon_seed: int = 0
 
 # Track dead players for game-over check
@@ -46,9 +47,9 @@ func create_server() -> Error:
 	return OK
 
 
-func join_server(ip: String) -> Error:
+func join_server(ip: String, port: int = DEFAULT_PORT) -> Error:
 	var peer = ENetMultiplayerPeer.new()
-	var err = peer.create_client(ip, DEFAULT_PORT)
+	var err = peer.create_client(ip, port)
 	if err != OK:
 		return err
 	multiplayer.multiplayer_peer = peer
@@ -57,6 +58,12 @@ func join_server(ip: String) -> Error:
 
 
 func disconnect_all() -> void:
+	if is_cloud_room:
+		if is_hosting:
+			CloudRoomAPI.close_room()
+		else:
+			CloudRoomAPI.leave_room()
+	is_cloud_room = false
 	var peer = multiplayer.multiplayer_peer
 	if peer is ENetMultiplayerPeer:
 		peer.close()
@@ -119,7 +126,8 @@ func host_start_game() -> void:
 		return
 	_dead_peers.clear()
 	current_dungeon_seed = randi()
-	# Send full player_info to ensure all clients have identical data at start
+	if is_cloud_room:
+		CloudRoomAPI.update_status("playing")
 	var info_snapshot: Dictionary = {}
 	for pid in player_info:
 		info_snapshot[pid] = player_info[pid].duplicate()

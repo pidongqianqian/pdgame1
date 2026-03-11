@@ -2,10 +2,15 @@
 .godot/
 *.import
 
-# Export
+# Export & Build
 export/
+build/
 *.pck
 *.zip
+
+# Deploy scripts with credentials
+server/deploy.sh
+server/fix_db.sh
 
 # OS
 .DS_Store

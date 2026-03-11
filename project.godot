@@ -29,6 +29,7 @@ ItemDatabase="*res://scripts/items/item_database.gd"
 LootTable="*res://scripts/items/loot_table.gd"
 UITheme="*res://scripts/ui/ui_theme.gd"
 NetworkManager="*res://scripts/network/network_manager.gd"
+CloudRoomAPI="*res://scripts/network/cloud_room_api.gd"
 SkillDatabase="*res://scripts/skills/skill_database.gd"
 
 [display]
@@ -109,4 +110,5 @@ skill_2={
 
 textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.031, 0.024, 0.055, 1)

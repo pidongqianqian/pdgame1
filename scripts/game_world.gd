@@ -20,10 +20,14 @@ var _game_over_ui: CanvasLayer = null
 var _skill_select_ui: CanvasLayer = null
 
 
+var _disconnect_ui: CanvasLayer = null
+
+
 func _ready() -> void:
 	GameManager.player_died.connect(_on_game_over)
 	if NetworkManager.is_multiplayer_active():
 		NetworkManager.host_disconnected.connect(_on_host_disconnected)
+		NetworkManager.player_disconnected.connect(_on_peer_disconnected)
 	_setup_dungeon()
 	_setup_canvas_modulate()
 	_spawn_player()
@@ -882,10 +886,12 @@ func _dismiss_game_over_ui() -> void:
 func _on_host_disconnected() -> void:
 	_dismiss_game_over_ui()
 	_dismiss_floor_clear_ui()
+	if _skill_select_ui and is_instance_valid(_skill_select_ui):
+		_skill_select_ui.queue_free()
+		_skill_select_ui = null
+	get_tree().paused = false
 	NetworkManager.disconnect_all()
-	var main_node = get_tree().current_scene
-	if main_node and main_node.has_method("return_to_title"):
-		main_node.return_to_title()
+	_show_disconnect_notice("房主已离开游戏", "连接已断开，即将返回主菜单…")
 
 
 func _dismiss_floor_clear_ui() -> void:
@@ -943,3 +949,157 @@ func _rpc_mp_restart(new_seed: int) -> void:
 	var main_node = get_tree().current_scene
 	if main_node and main_node.has_method("start_game"):
 		main_node.start_game()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Disconnect Notice
+# ═══════════════════════════════════════════════════════════════
+
+func _on_peer_disconnected(peer_id: int) -> void:
+	var peer_player: Node2D = GameManager.player_nodes.get(peer_id)
+	if peer_player and is_instance_valid(peer_player):
+		peer_player.queue_free()
+	GameManager.player_nodes.erase(peer_id)
+	_show_toast("一位玩家离开了游戏")
+
+
+func _show_disconnect_notice(title_text: String, body_text: String) -> void:
+	if _disconnect_ui:
+		return
+
+	_disconnect_ui = CanvasLayer.new()
+	_disconnect_ui.layer = 25
+	_disconnect_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_disconnect_ui)
+
+	var overlay = ColorRect.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	_disconnect_ui.add_child(overlay)
+	var fade_tw = create_tween()
+	fade_tw.tween_property(overlay, "color:a", 0.6, 0.5)
+
+	var panel = PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.offset_left = -150
+	panel.offset_right = 150
+	panel.offset_top = -70
+	panel.offset_bottom = 70
+	var panel_sb = StyleBoxFlat.new()
+	panel_sb.bg_color = Color(0.08, 0.05, 0.14, 0.95)
+	panel_sb.border_color = Color(1.0, 0.5, 0.2, 0.8)
+	panel_sb.set_border_width_all(2)
+	panel_sb.set_corner_radius_all(4)
+	panel_sb.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", panel_sb)
+	_disconnect_ui.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 10)
+	panel.add_child(vbox)
+
+	var icon_lbl = Label.new()
+	icon_lbl.text = "⚠"
+	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon_lbl.add_theme_font_size_override("font_size", 24)
+	icon_lbl.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2))
+	vbox.add_child(icon_lbl)
+
+	var title_lbl = Label.new()
+	title_lbl.text = title_text
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UITheme.style_label(title_lbl, UITheme.FONT_SIZE_HEADER, Color(1.0, 0.7, 0.3))
+	vbox.add_child(title_lbl)
+
+	var body_lbl = Label.new()
+	body_lbl.text = body_text
+	body_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UITheme.style_label(body_lbl, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
+	vbox.add_child(body_lbl)
+
+	var countdown_lbl = Label.new()
+	countdown_lbl.name = "Countdown"
+	countdown_lbl.text = "3 秒后自动返回…"
+	countdown_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UITheme.style_label(countdown_lbl, UITheme.FONT_SIZE_TINY, UITheme.COLORS["text_dim"])
+	vbox.add_child(countdown_lbl)
+
+	var btn = Button.new()
+	btn.text = "  立即返回  "
+	btn.custom_minimum_size = Vector2(120, 28)
+	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	UITheme.style_button(btn, UITheme.FONT_SIZE_BODY)
+	btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+	btn.pressed.connect(_on_disconnect_return)
+	vbox.add_child(btn)
+
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.85, 0.85)
+	panel.pivot_offset = panel.size / 2
+	var tw = create_tween().set_parallel(true)
+	tw.tween_property(panel, "modulate:a", 1.0, 0.4)
+	tw.tween_property(panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK)
+
+	_run_disconnect_countdown(countdown_lbl, 3)
+
+
+func _run_disconnect_countdown(lbl: Label, seconds: int) -> void:
+	for i in range(seconds, 0, -1):
+		if not is_instance_valid(lbl):
+			return
+		lbl.text = "%d 秒后自动返回…" % i
+		await get_tree().create_timer(1.0).timeout
+	_on_disconnect_return()
+
+
+func _on_disconnect_return() -> void:
+	if _disconnect_ui:
+		_disconnect_ui.queue_free()
+		_disconnect_ui = null
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("return_to_title"):
+		main_node.return_to_title()
+
+
+func _show_toast(msg: String) -> void:
+	var toast_layer = CanvasLayer.new()
+	toast_layer.layer = 22
+	add_child(toast_layer)
+
+	var lbl = Label.new()
+	lbl.text = msg
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	lbl.offset_top = 30
+	lbl.offset_bottom = 54
+	lbl.offset_left = -120
+	lbl.offset_right = 120
+	UITheme.style_label(lbl, UITheme.FONT_SIZE_SMALL, Color(1.0, 0.75, 0.3))
+
+	var bg = PanelContainer.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	bg.offset_top = 26
+	bg.offset_bottom = 56
+	bg.offset_left = -130
+	bg.offset_right = 130
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.1, 0.06, 0.16, 0.9)
+	sb.border_color = Color(1.0, 0.6, 0.2, 0.6)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(6)
+	bg.add_theme_stylebox_override("panel", sb)
+	toast_layer.add_child(bg)
+	toast_layer.add_child(lbl)
+
+	lbl.modulate.a = 0.0
+	bg.modulate.a = 0.0
+	var tw = create_tween()
+	tw.tween_property(lbl, "modulate:a", 1.0, 0.3)
+	tw.parallel().tween_property(bg, "modulate:a", 1.0, 0.3)
+	tw.tween_interval(2.5)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.5)
+	tw.parallel().tween_property(bg, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(toast_layer.queue_free)
