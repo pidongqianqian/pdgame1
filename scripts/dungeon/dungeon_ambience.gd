@@ -1,63 +1,97 @@
 extends CanvasLayer
 
-const VIGNETTE_SHADER = "
+const DUNGEON_FOG_SHADER = "
 shader_type canvas_item;
-uniform float intensity : hint_range(0.0, 1.0) = 0.6;
-uniform float softness  : hint_range(0.1, 2.0) = 0.5;
-uniform vec4  tint_color = vec4(0.0, 0.0, 0.02, 1.0);
+
+uniform float inner_radius : hint_range(0.0, 1.0) = 0.45;
+uniform float outer_radius : hint_range(0.0, 1.5) = 1.0;
+uniform float edge_darkness : hint_range(0.0, 1.0) = 0.72;
+uniform float base_darkness : hint_range(0.0, 1.0) = 0.35;
+uniform vec3  fog_tint = vec3(0.02, 0.01, 0.05);
+uniform float time_val = 0.0;
+
+uniform int   torch_count = 0;
+uniform vec2  torch_uvs[48];
+uniform float torch_radius = 0.38;
+
 void fragment() {
-	vec2 uv  = UV - 0.5;
+	vec2 uv = UV - 0.5;
+	float aspect = SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x;
+	uv.x *= aspect;
 	float dist = length(uv) * 2.0;
-	float vig  = smoothstep(1.0 - softness, 1.0, dist * intensity);
-	COLOR = vec4(tint_color.rgb, vig * 0.88);
+
+	float fog = smoothstep(inner_radius, outer_radius, dist);
+	float breath = sin(time_val * 1.8) * 0.02 + sin(time_val * 3.7) * 0.01;
+	fog = clamp(fog + breath, 0.0, 1.0);
+	float darkness = mix(base_darkness, edge_darkness, fog);
+
+	float player_glow = 1.0 - smoothstep(0.0, 0.38, dist);
+	float player_flicker = sin(time_val * 5.5) * 0.04
+	                     + sin(time_val * 12.3) * 0.02
+	                     + sin(time_val * 21.0) * 0.01;
+	player_glow *= (0.75 + player_flicker);
+	darkness *= (1.0 - player_glow * 0.8);
+
+	float total_torch = 0.0;
+	for (int i = 0; i < 48; i++) {
+		if (i >= torch_count) break;
+		vec2 t_uv = torch_uvs[i] - 0.5;
+		t_uv.x *= aspect;
+		float t_dist = length(uv - t_uv) * 2.0;
+		float flicker = sin(time_val * 5.0 + float(i) * 2.5) * 0.04
+		              + sin(time_val * 11.0 + float(i) * 1.7) * 0.025
+		              + sin(time_val * 23.0 + float(i) * 3.1) * 0.012;
+		float radius = torch_radius + flicker;
+		float glow = 1.0 - smoothstep(0.0, radius, t_dist);
+		total_torch = max(total_torch, glow);
+	}
+	darkness *= (1.0 - total_torch * 0.88);
+
+	vec3 torch_warm = vec3(0.35, 0.15, 0.03);
+	vec3 final_tint = mix(fog_tint, torch_warm, total_torch * 0.8);
+
+	COLOR = vec4(final_tint, darkness);
 }
 "
 
-const TORCH_SHADER = "
-shader_type canvas_item;
-uniform float time_offset = 0.0;
-void fragment() {
-	float flicker = sin(TIME * 8.0 + time_offset) * 0.12
-	              + sin(TIME * 17.3 + time_offset * 2.0) * 0.06
-	              + 0.82;
-	COLOR = texture(TEXTURE, UV) * vec4(1.0, 1.0, 1.0, flicker);
-}
-"
-
-var _vignette: ColorRect
+var _fog_rect: ColorRect
+var _fog_material: ShaderMaterial
 var _dust_nodes: Array = []
-var _torch_lights: Array = []
+var _torch_positions: Array = []
+var _torch_sprites: Array = []
 var _floor_overlay: ColorRect
 
-# 每层的色调（RGB色偏）
 const FLOOR_TINTS = {
-	1: Color(0.0, 0.0, 0.02),   # 1-2层: 蓝黑
-	3: Color(0.03, 0.0, 0.0),   # 3-4层: 暗红
-	5: Color(0.02, 0.0, 0.04),  # 5+层: 深紫
+	1: Vector3(0.02, 0.01, 0.05),
+	3: Vector3(0.06, 0.01, 0.02),
+	5: Vector3(0.04, 0.01, 0.06),
 }
 
 
 func _ready() -> void:
 	layer = 5
-	_create_vignette()
+	_create_fog_overlay()
 	_create_floor_overlay()
 	_spawn_dust_particles()
 	_update_floor_theme()
 
 
-func _create_vignette() -> void:
-	_vignette = ColorRect.new()
-	_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+func _create_fog_overlay() -> void:
+	_fog_rect = ColorRect.new()
+	_fog_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fog_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var shader = Shader.new()
-	shader.code = VIGNETTE_SHADER
-	var mat = ShaderMaterial.new()
-	mat.shader = shader
-	mat.set_shader_parameter("intensity", 0.62)
-	mat.set_shader_parameter("softness", 0.50)
-	_vignette.material = mat
-	add_child(_vignette)
+	shader.code = DUNGEON_FOG_SHADER
+	_fog_material = ShaderMaterial.new()
+	_fog_material.shader = shader
+	_fog_material.set_shader_parameter("inner_radius", 0.50)
+	_fog_material.set_shader_parameter("outer_radius", 1.10)
+	_fog_material.set_shader_parameter("edge_darkness", 0.50)
+	_fog_material.set_shader_parameter("base_darkness", 0.18)
+	_fog_material.set_shader_parameter("torch_radius", 0.38)
+	_fog_rect.material = _fog_material
+	add_child(_fog_rect)
 
 
 func _create_floor_overlay() -> void:
@@ -69,8 +103,8 @@ func _create_floor_overlay() -> void:
 
 
 func _update_floor_theme() -> void:
-	var floor_num = GameManager.current_floor
-	var tint: Color
+	var floor_num: int = GameManager.current_floor
+	var tint: Vector3
 	if floor_num >= 5:
 		tint = FLOOR_TINTS[5]
 	elif floor_num >= 3:
@@ -78,10 +112,13 @@ func _update_floor_theme() -> void:
 	else:
 		tint = FLOOR_TINTS[1]
 
-	var mat = _vignette.material as ShaderMaterial
-	if mat:
-		mat.set_shader_parameter("tint_color",
-			Vector4(tint.r, tint.g, tint.b, 1.0))
+	if _fog_material:
+		_fog_material.set_shader_parameter("fog_tint", tint)
+		var darkness_scale: float = 1.0 + floor_num * 0.02
+		_fog_material.set_shader_parameter("edge_darkness",
+			clampf(0.50 * darkness_scale, 0.0, 0.65))
+		_fog_material.set_shader_parameter("base_darkness",
+			clampf(0.18 + floor_num * 0.015, 0.0, 0.30))
 
 
 func _spawn_dust_particles() -> void:
@@ -106,11 +143,11 @@ func _spawn_dust_particles() -> void:
 
 func _process(delta: float) -> void:
 	_animate_dust(delta)
-	_flicker_torches(delta)
+	_update_torch_shader()
 
 
 func _animate_dust(delta: float) -> void:
-	var t = Time.get_ticks_msec() / 1000.0
+	var t: float = Time.get_ticks_msec() / 1000.0
 	for d in _dust_nodes:
 		var node: ColorRect = d["node"]
 		node.position.y -= d["speed"] * delta
@@ -121,47 +158,110 @@ func _animate_dust(delta: float) -> void:
 			node.position.x = randf_range(0, 800)
 
 
-func _flicker_torches(delta: float) -> void:
-	var t = Time.get_ticks_msec() / 1000.0
-	for torch_data in _torch_lights:
-		var light: PointLight2D = torch_data["light"]
-		var offset: float = torch_data["offset"]
-		if is_instance_valid(light):
-			var flicker = sin(t * 7.5 + offset) * 0.12 + sin(t * 19.3 + offset) * 0.05
-			light.energy = 0.65 + flicker
-			light.position.x = torch_data["base_x"] + sin(t * 4.2 + offset) * 0.4
+func _update_torch_shader() -> void:
+	if not _fog_material:
+		return
+	_fog_material.set_shader_parameter("time_val",
+		Time.get_ticks_msec() / 1000.0)
+
+	var viewport = get_viewport()
+	if not viewport:
+		return
+
+	var canvas_xform: Transform2D = viewport.get_canvas_transform()
+	var vp_size: Vector2 = viewport.get_visible_rect().size
+
+	var uvs := PackedVector2Array()
+	var count: int = 0
+	for pos in _torch_positions:
+		if count >= 48:
+			break
+		var screen_pos: Vector2 = canvas_xform * (pos as Vector2)
+		uvs.append(screen_pos / vp_size)
+		count += 1
+
+	while uvs.size() < 48:
+		uvs.append(Vector2(-10.0, -10.0))
+
+	_fog_material.set_shader_parameter("torch_count", count)
+	_fog_material.set_shader_parameter("torch_uvs", uvs)
 
 
 func add_torch_light(world_pos: Vector2) -> void:
+	_torch_positions.append(world_pos)
+	_spawn_torch_sprite(world_pos)
+
+
+func clear_torches() -> void:
+	_torch_positions.clear()
+	for s in _torch_sprites:
+		if is_instance_valid(s):
+			s.queue_free()
+	_torch_sprites.clear()
+
+
+func _spawn_torch_sprite(world_pos: Vector2) -> void:
+	var scene_root = get_tree().current_scene
+	if not scene_root:
+		return
+
+	var torch_tex = load("res://assets/sprites/objects/torch.png")
+	if not torch_tex:
+		return
+
+	# 火把精灵动画
+	var spr = AnimatedSprite2D.new()
+	var frames = SpriteFrames.new()
+	frames.add_animation("flicker")
+	frames.set_animation_speed("flicker", 6.0)
+	frames.set_animation_loop("flicker", true)
+
+	var atlas_w: int = torch_tex.get_width()
+	var frame_w: int = 16
+	var frame_count: int = atlas_w / frame_w
+
+	for i in frame_count:
+		var atlas = AtlasTexture.new()
+		atlas.atlas = torch_tex
+		atlas.region = Rect2(i * frame_w, 0, frame_w, 16)
+		frames.add_frame("flicker", atlas)
+
+	spr.sprite_frames = frames
+	spr.global_position = world_pos + Vector2(0, -4)
+	spr.z_index = 5
+	spr.play("flicker")
+	scene_root.add_child(spr)
+	_torch_sprites.append(spr)
+
+	# 火把暖色光晕 (PointLight2D)
 	var light = PointLight2D.new()
+	light.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	light.texture = _make_torch_glow_texture()
 	light.global_position = world_pos
-	light.texture = _make_light_texture()
-	light.texture_scale = 2.8
-	light.color = Color(1.0, 0.72, 0.35)
-	light.energy = 0.65
+	light.texture_scale = 7.0
+	light.color = Color(1.0, 0.7, 0.3)
+	light.energy = 0.75
 	light.blend_mode = PointLight2D.BLEND_MODE_ADD
-	# 加入主场景而非 CanvasLayer
-	get_tree().current_scene.add_child(light)
-	_torch_lights.append({
-		"light": light,
-		"offset": randf_range(0, TAU),
-		"base_x": world_pos.x,
-	})
+	scene_root.add_child(light)
+	_torch_sprites.append(light)
 
 
-func _make_light_texture() -> GradientTexture2D:
-	var tex = GradientTexture2D.new()
-	tex.fill = GradientTexture2D.FILL_RADIAL
-	tex.fill_from = Vector2(0.5, 0.5)
-	tex.fill_to   = Vector2(1.0, 0.5)
-	var g = Gradient.new()
-	g.add_point(0.0, Color(1, 1, 1, 1))
-	g.add_point(0.45, Color(1, 0.85, 0.5, 0.5))
-	g.add_point(1.0, Color(1, 0.6, 0.2, 0))
-	tex.gradient = g
-	tex.width = 64
-	tex.height = 64
-	return tex
+func _make_torch_glow_texture() -> ImageTexture:
+	var size: int = 128
+	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var center: float = size / 2.0
+	var max_r: float = size / 2.0
+	for y in size:
+		for x in size:
+			var dx: float = x - center + 0.5
+			var dy: float = y - center + 0.5
+			var dist: float = sqrt(dx * dx + dy * dy) / max_r
+			var alpha: float = 0.0
+			if dist < 0.85:
+				var t: float = 1.0 - dist / 0.85
+				alpha = t * t * 0.6
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+	return ImageTexture.create_from_image(img)
 
 
 func flash_transition(color: Color = Color.BLACK, duration: float = 0.35) -> void:

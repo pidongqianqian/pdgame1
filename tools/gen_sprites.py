@@ -35,64 +35,163 @@ def add_outline(img, color=(8, 6, 14, 255)):
 
 def make_floor():
     img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
-    BASE_C = (34, 31, 48, 255)
+
+    # 暖灰棕色石板地面 — 和深紫墙壁形成明显色差
+    BASE   = (52, 46, 42, 255)   # 基础暖灰棕
+    TILE_A = (58, 52, 46, 255)   # 石板 A - 稍亮
+    TILE_B = (54, 48, 44, 255)   # 石板 B
+    GROUT  = (36, 30, 28, 255)   # 砖缝 - 深棕
+    HI     = (68, 62, 54, 255)   # 高光
+    HI2    = (76, 68, 58, 255)   # 亮高光
+    DK     = (42, 36, 34, 255)   # 暗角
+
     for y in range(16):
         for x in range(16):
-            img.putpixel((x, y), BASE_C)
+            img.putpixel((x, y), BASE)
 
-    # 石板纹理 - 不规则高光点
-    lights = [(2,1),(5,0),(9,2),(13,1),(1,5),(7,4),(12,6),(3,8),(8,7),
-              (11,9),(14,8),(0,11),(6,12),(10,13),(15,11),(4,14),(2,3),(13,10)]
-    for (x,y) in lights:
-        p(img, x, y, (50, 46, 68, 255))
+    def slab(x0, y0, x1, y1, color):
+        for yy in range(y0, y1+1):
+            for xx in range(x0, x1+1):
+                p(img, xx, yy, color)
+        for xx in range(x0, x1+1):
+            p(img, xx, y0, HI)
+        for yy in range(y0, y1+1):
+            p(img, x0, yy, HI)
+        for xx in range(x0, x1+1):
+            p(img, xx, y1, DK)
+        for yy in range(y0, y1+1):
+            p(img, x1, yy, DK)
 
-    darks = [(4,2),(0,6),(6,3),(14,4),(3,9),(9,5),(15,13),(7,15),(11,14)]
-    for (x,y) in darks:
-        p(img, x, y, (22, 19, 34, 255))
-
-    # 石板裂缝线
+    # 砖缝
     for x in range(16):
-        c = img.getpixel((x, 8))
-        img.putpixel((x, 8), (max(0,c[0]-10), max(0,c[1]-10), max(0,c[2]-8), 255))
+        p(img, x, 0, GROUT); p(img, x, 7, GROUT)
+        p(img, x, 8, GROUT); p(img, x, 15, GROUT)
     for y in range(16):
-        c = img.getpixel((9, y))
-        img.putpixel((9, y), (max(0,c[0]-8), max(0,c[1]-8), max(0,c[2]-6), 255))
+        p(img, 0, y, GROUT); p(img, 15, y, GROUT)
+    for y in range(0, 8):
+        p(img, 8, y, GROUT)
+    for y in range(8, 16):
+        p(img, 4, y, GROUT); p(img, 11, y, GROUT)
+
+    slab(1, 1, 7, 6, TILE_A)
+    slab(9, 1, 14, 6, TILE_B)
+    slab(1, 9, 3, 14, TILE_B)
+    slab(5, 9, 10, 14, TILE_A)
+    slab(12, 9, 14, 14, TILE_B)
+
+    # 磨损高光和暗点
+    for (x,y) in [(3,2),(6,4),(10,3),(13,5),(2,10),(7,12),(9,11),(14,13)]:
+        p(img, x, y, HI2)
+    for (x,y) in [(5,3),(11,2),(4,5),(12,6),(3,11),(8,13),(6,10),(13,12)]:
+        p(img, x, y, DK)
+
+    # 苔藓
+    moss = (42, 50, 38, 255)
+    for (x,y) in [(2,5),(11,4),(7,13),(14,10)]:
+        p(img, x, y, moss)
+
+    return img
+
+
+def make_void():
+    """围墙外部的深渊虚空纹理 — 极暗带微弱岩石纹理"""
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+
+    BASE = (8, 6, 14, 255)     # 极暗紫黑
+    V1   = (12, 10, 20, 255)   # 微亮变化
+    V2   = (6, 4, 10, 255)     # 更暗变化
+    EDGE = (16, 14, 26, 255)   # 偶尔可见的岩壁纹理
+
+    import random
+    random.seed(101)
+    for y in range(16):
+        for x in range(16):
+            r = random.random()
+            if r < 0.08:
+                img.putpixel((x, y), EDGE)
+            elif r < 0.25:
+                img.putpixel((x, y), V1)
+            elif r < 0.40:
+                img.putpixel((x, y), V2)
+            else:
+                img.putpixel((x, y), BASE)
+
     return img
 
 
 def make_wall():
     img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
-    MORT = (18, 14, 26, 255)
-    BRK1 = (58, 44, 72, 255)
-    BRK2 = (50, 38, 64, 255)
-    BHI  = (72, 56, 90, 255)
-    BSH  = (34, 24, 46, 255)
+
+    # 深色石砖墙 - 蓝紫灰色调
+    MORT = (14, 12, 22, 255)    # 砖缝（极暗）
+    BRK1 = (48, 42, 65, 255)   # 砖体 A
+    BRK2 = (42, 36, 58, 255)   # 砖体 B
+    BRK3 = (52, 46, 70, 255)   # 砖体 C 变化
+    BHI  = (65, 56, 85, 255)   # 砖面高光
+    BHI2 = (75, 65, 95, 255)   # 强高光
+    BSH  = (28, 22, 38, 255)   # 砖底阴影
+    BSHD = (18, 14, 28, 255)   # 深阴影
+    TOP  = (78, 68, 100, 255)  # 顶部边缘高光
 
     for y in range(16):
         for x in range(16):
             img.putpixel((x, y), MORT)
 
-    def brick(x0, y0, x1, y1, color, hi, sh):
+    def brick(x0, y0, x1, y1, color):
         for yy in range(y0, y1+1):
             for xx in range(x0, x1+1):
-                img.putpixel((xx, yy), color)
+                p(img, xx, yy, color)
+        # 顶面高光（光从上方来）
         for xx in range(x0, x1+1):
-            p(img, xx, y0, hi)
-            p(img, xx, y1, sh)
-        for yy in range(y0, y1+1):
-            p(img, x0, yy, sh)
-            p(img, x1, yy, hi if yy == y0 else BSH)
+            p(img, xx, y0, BHI)
+        # 左面高光
+        p(img, x0, y0, BHI2)
+        p(img, x0, y0+1, BHI)
+        # 底面阴影
+        for xx in range(x0, x1+1):
+            p(img, xx, y1, BSH)
+        # 右面暗
+        for yy in range(y0+1, y1+1):
+            p(img, x1, yy, BSH)
+        # 右下角最暗
+        p(img, x1, y1, BSHD)
 
-    brick(1, 1, 8,  4, BRK1, BHI, BSH)
-    brick(10,1, 14, 4, BRK2, BHI, BSH)
-    brick(1, 6, 5,  9, BRK2, BHI, BSH)
-    brick(7, 6, 14, 9, BRK1, BHI, BSH)
-    brick(1,11, 8, 14, BRK1, BHI, BSH)
-    brick(10,11,14,14, BRK2, BHI, BSH)
+    # 三排错位砖块
+    # 第一排
+    brick(1,  1, 7,  4, BRK1)
+    brick(9,  1, 14, 4, BRK2)
+    # 第二排（错位半砖）
+    brick(1,  6, 4,  9, BRK2)
+    brick(6,  6, 11, 9, BRK3)
+    brick(13, 6, 14, 9, BRK1)
+    # 第三排
+    brick(1, 11, 8, 14, BRK3)
+    brick(10,11, 14,14, BRK1)
 
-    # 顶部高光、左侧阴影
-    for x in range(16): p(img, x, 0, (82, 65, 102, 255))
-    for y in range(16): p(img, 0, y, (12, 9, 18, 255))
+    # 砖面纹理 - 细微噪点
+    import random
+    random.seed(42)
+    for _ in range(12):
+        rx = random.randint(1, 14)
+        ry = random.randint(1, 14)
+        cur = img.getpixel((rx, ry))
+        if cur[3] > 0 and cur != MORT:
+            vary = random.choice([-6, -4, 4, 6])
+            p(img, rx, ry, (
+                max(0, min(255, cur[0]+vary)),
+                max(0, min(255, cur[1]+vary)),
+                max(0, min(255, cur[2]+vary+2)),
+                255
+            ))
+
+    # 最顶部一条亮线（表示墙顶）
+    for x in range(16):
+        p(img, x, 0, TOP)
+
+    # 最左侧暗线
+    for y in range(16):
+        p(img, 0, y, BSHD)
+
     return img
 
 # ════════════════════════════════════════════════════════════
@@ -525,27 +624,77 @@ def make_hit_effect():
 
 
 # ════════════════════════════════════════════════════════════
-# 主函数
+# 主函数（只在直接运行时执行，import 时不触发）
 # ════════════════════════════════════════════════════════════
 
-print("正在生成像素美术精灵...")
+def make_torch():
+    """生成火把精灵表 — 4 帧横排 (每帧 16x16)"""
+    frames = 4
+    img = Image.new("RGBA", (16 * frames, 16), (0, 0, 0, 0))
 
-sprites = [
-    (make_floor(),          f"{BASE}/tiles/floor.png"),
-    (make_wall(),           f"{BASE}/tiles/wall.png"),
-    (make_player_idle(),    f"{BASE}/player/player_idle.png"),
-    (make_player_walk1(),   f"{BASE}/player/player_walk1.png"),
-    (make_player_walk2(),   f"{BASE}/player/player_walk2.png"),
-    (make_player_attack(),  f"{BASE}/player/player_attack.png"),
-    (make_slime(),          f"{BASE}/enemies/slime.png"),
-    (make_skeleton(),       f"{BASE}/enemies/skeleton.png"),
-    (make_boss(),           f"{BASE}/enemies/boss_dark_knight.png"),
-    (make_loot(),           f"{BASE}/items/loot_drop.png"),
-    (make_sword_icon(),     f"{BASE}/items/sword_icon.png"),
-    (make_hit_effect(),     f"{BASE}/effects/hit_effect.png"),
-]
+    HANDLE  = (70, 50, 35, 255)
+    HANDLE2 = (55, 38, 25, 255)
+    BRACKET = (100, 90, 70, 255)
 
-for img, path in sprites:
-    save(img, path)
+    FLAME_CORE   = (255, 240, 180, 255)
+    FLAME_MID    = (255, 160, 40, 255)
+    FLAME_OUTER  = (220, 90, 15, 255)
+    FLAME_TIP    = (255, 200, 80, 200)
+    EMBER        = (180, 60, 10, 180)
 
-print(f"\n完成！共生成 {len(sprites)} 个精灵。")
+    import random
+    random.seed(42)
+
+    for f in range(frames):
+        ox = f * 16
+
+        for y in range(9, 15):
+            p(img, ox + 7, y, HANDLE)
+            p(img, ox + 8, y, HANDLE2)
+
+        p(img, ox + 6, 9, BRACKET)
+        p(img, ox + 9, 9, BRACKET)
+        p(img, ox + 6, 8, BRACKET)
+        p(img, ox + 9, 8, BRACKET)
+        p(img, ox + 15, 15, (0, 0, 0, 0))
+
+        flame_shift = [0, 1, 0, -1][f]
+
+        p(img, ox + 7, 7, FLAME_OUTER)
+        p(img, ox + 8, 7, FLAME_OUTER)
+        p(img, ox + 6, 6 + flame_shift, FLAME_OUTER)
+        p(img, ox + 9, 6 + flame_shift, FLAME_OUTER)
+
+        p(img, ox + 7, 5 + flame_shift, FLAME_MID)
+        p(img, ox + 8, 5 + flame_shift, FLAME_MID)
+        p(img, ox + 7, 6, FLAME_MID)
+        p(img, ox + 8, 6, FLAME_MID)
+
+        p(img, ox + 7, 4 + flame_shift, FLAME_CORE)
+        p(img, ox + 8, 4 + flame_shift, FLAME_CORE)
+
+        tip_x = 7 + [0, 1, 0, -1][f]
+        p(img, ox + tip_x, 3 + flame_shift, FLAME_TIP)
+
+        if f % 2 == 0:
+            p(img, ox + 5, 5 + flame_shift, EMBER)
+        else:
+            p(img, ox + 10, 4 + flame_shift, EMBER)
+
+    return img
+
+
+if __name__ == "__main__":
+    print("正在生成像素美术精灵（地板、墙壁、虚空和火把）...")
+
+    sprites = [
+        (make_floor(),  f"{BASE}/tiles/floor.png"),
+        (make_wall(),   f"{BASE}/tiles/wall.png"),
+        (make_void(),   f"{BASE}/tiles/void.png"),
+        (make_torch(),  f"{BASE}/objects/torch.png"),
+    ]
+
+    for img, path in sprites:
+        save(img, path)
+
+    print(f"\n完成！共生成 {len(sprites)} 个精灵。")

@@ -1,0 +1,32 @@
+---
+description: Godot 4 / GDScript 编码规范
+globs: "**/*.gd"
+alwaysApply: false
+---
+
+# GDScript 编码规范
+
+## 类型与变量
+
+- 函数参数和返回值尽量标注类型（`: int`, `-> void`）
+- 局部变量使用 `var x: int = ...` 避免类型推断错误
+- 常量用 `const`，不可变配置用 `const Dictionary`
+
+## 多人联机
+
+- 新增游戏逻辑必须考虑多人兼容：`NetworkManager.is_multiplayer_active()` 判断
+- 伤害/状态变更走 Host 权威：客户端通过 RPC 请求，Host 处理后广播
+- 视觉效果（VFX）可以本地创建，不需要同步
+- 使用 `multiplayer.is_server()` 判断是否为 Host
+
+## 场景与节点
+
+- 动态创建节点优先于 `.tscn` 预制（减少文件数量）
+- 信号命名：过去式动词（`died`, `hp_changed`, `floor_changed`）
+- 组名统一：`enemies`, `hud`, `players`
+
+## UI
+
+- 所有 UI 使用 `UITheme` 静态方法统一样式
+- 暂停游戏的弹窗设置 `process_mode = Node.PROCESS_MODE_ALWAYS`
+- 锚点定位优先于绝对坐标

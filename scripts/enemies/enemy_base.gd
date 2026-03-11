@@ -1,7 +1,7 @@
 extends CharacterBody2D
 class_name EnemyBase
 
-signal died_in_room(room_index: int, pos: Vector2, is_boss: bool, gold: int)
+signal died_in_room(room_index: int, pos: Vector2, is_boss: bool, gold: int, xp_reward: int)
 
 enum AIState { IDLE, PATROL, CHASE, ATTACK, HURT, DEAD }
 
@@ -15,6 +15,7 @@ enum AIState { IDLE, PATROL, CHASE, ATTACK, HURT, DEAD }
 @export var is_boss: bool = false
 @export var soul_reward: int = 1
 @export var gold_reward: int = 5
+@export var xp_reward: int = 12
 
 const SEPARATION_RADIUS = 20.0
 const SEPARATION_FORCE = 120.0
@@ -31,6 +32,12 @@ var _patrol_direction: Vector2 = Vector2.ZERO
 var _patrol_timer: float = 0.0
 var _hurt_timer: float = 0.0
 var _idle_timer: float = 0.0
+
+# 状态异常
+var _freeze_timer: float = 0.0
+var _slow_timer: float = 0.0
+var _slow_percent: float = 0.0
+var _is_frozen: bool = false
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hitbox: Area2D = $Hitbox
@@ -51,6 +58,13 @@ func _physics_process(delta: float) -> void:
 	# 多人模式下只有 Host (peer_id=1) 运行 AI
 	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
 		return
+	_update_debuffs(delta)
+	if _is_frozen:
+		velocity = Vector2.ZERO
+		move_and_slide()
+		if NetworkManager.is_multiplayer_active():
+			_rpc_sync_pos.rpc(global_position, int(ai_state))
+		return
 	_update_timers(delta)
 	_find_target()
 	match ai_state:
@@ -67,6 +81,9 @@ func _physics_process(delta: float) -> void:
 
 	var sep = _get_separation_force()
 	velocity += sep
+	# 减速效果
+	if _slow_timer > 0.0:
+		velocity *= (1.0 - _slow_percent)
 	move_and_slide()
 
 	# Host 每帧广播位置给所有客户端
@@ -254,7 +271,8 @@ func _die() -> void:
 		hitbox.set_deferred("monitoring", false)
 		hitbox.set_deferred("monitorable", false)
 	GameManager.add_souls(soul_reward)
-	died_in_room.emit(room_index, global_position, is_boss, gold_reward)
+	var xp: int = xp_reward if not is_boss else randi_range(50, 80)
+	died_in_room.emit(room_index, global_position, is_boss, gold_reward, xp)
 
 	var tween = create_tween()
 	tween.tween_property(sprite, "modulate", Color(1, 0.3, 0.3, 1), 0.1)
@@ -290,6 +308,33 @@ func _show_damage_number(amount: int) -> void:
 	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.6)
 	tween.parallel().tween_property(label, "scale", Vector2(1.2, 1.2), 0.08)
 	tween.tween_callback(label.queue_free)
+
+
+func _update_debuffs(delta: float) -> void:
+	if _freeze_timer > 0.0:
+		_freeze_timer -= delta
+		if _freeze_timer <= 0.0:
+			_is_frozen = false
+			sprite.modulate = Color.WHITE
+	if _slow_timer > 0.0:
+		_slow_timer -= delta
+		if _slow_timer <= 0.0:
+			_slow_percent = 0.0
+			if not _is_frozen:
+				sprite.modulate = Color.WHITE
+
+
+func apply_freeze(duration: float) -> void:
+	_freeze_timer = duration
+	_is_frozen = true
+	sprite.modulate = Color(0.4, 0.7, 1.0)
+
+
+func apply_slow(duration: float, percent: float = 0.5) -> void:
+	_slow_timer = duration
+	_slow_percent = percent
+	if not _is_frozen:
+		sprite.modulate = Color(0.6, 0.8, 1.0)
 
 
 func _on_hitbox_body_entered(body: Node2D) -> void:

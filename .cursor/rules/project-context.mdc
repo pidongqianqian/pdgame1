@@ -1,0 +1,40 @@
+---
+description: 像素深渊项目上下文 — 每次对话开始时自动了解项目状态、开发计划和规范
+alwaysApply: true
+---
+
+# 像素深渊 — 项目开发规范
+
+## 项目概况
+
+Godot 4.3+ / GDScript 像素风 Roguelite 地牢探索游戏，支持单人和局域网4人合作。
+
+## 开发进度与计划
+
+**在开始任何工作前，先阅读以下 plan 文件了解当前进度：**
+
+1. `.cursor/plans/像素roguelite游戏开发_282eeb2e.plan.md` — 总体开发计划，包含所有 Phase 的里程碑和 TODO 状态
+2. `.cursor/plans/技能系统实现_04eac437.plan.md` — 技能系统专项计划
+3. `.cursor/plans/局域网多人联机_fdacbe9f.plan.md` — 多人联机专项计划
+
+根据 plan 中的 TODO 状态（pending/completed）判断哪些功能已完成、哪些待开发，循序渐进推进。
+
+## 开发原则
+
+- 每完成一个功能模块后，更新相关 plan 文件的 TODO 状态和实现说明
+- 新增功能需考虑多人联机兼容（Host权威模型、RPC同步）
+- 修复 bug 时在 plan 中记录已知修复
+- 代码风格：GDScript，使用信号解耦，Autoload 单例管理全局状态
+
+## 核心架构速查
+
+- **Autoload 单例**：GameManager / SaveManager / AudioManager / ItemDatabase / LootTable / UITheme / NetworkManager / SkillDatabase
+- **玩家**：`player_controller.gd`（状态机）+ `player_stats.gd`（属性/XP/天赋/buff）+ `skill_manager.gd`（技能冷却）
+- **地牢**：`dungeon_generator.gd`（BSP生成）+ `dungeon_ambience.gd`（迷雾着色器+火把）
+- **游戏循环**：`game_world.gd`（生成/商店/过层/死亡/XP分发）
+- **联机**：`network_manager.gd`（ENet, Host权威, RPC）
+- **内部分辨率**：640x360，Camera2D zoom=2x
+
+## 回复语言
+
+始终使用中文（简体）回复。

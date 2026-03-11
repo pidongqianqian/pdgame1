@@ -50,5 +50,4 @@ func _on_network_start() -> void:
 func _on_player_died() -> void:
 	GameManager.end_run(false)
 	SaveManager.save_game()
-	await get_tree().create_timer(1.5).timeout
-	_load_scene("res://scenes/ui/title_screen.tscn")
+	# 不再自动跳转标题，由 game_world 显示死亡 UI 让玩家选择

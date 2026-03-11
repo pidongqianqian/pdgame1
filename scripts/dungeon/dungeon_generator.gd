@@ -150,14 +150,21 @@ func _apply_to_tilemap() -> void:
 	if not tilemap:
 		return
 	tilemap.clear()
-	for y in MAP_HEIGHT:
-		for x in MAP_WIDTH:
-			var tile_type = grid[y][x]
-			if tile_type == TileType.FLOOR:
-				tilemap.set_cell(Vector2i(x, y), 0, Vector2i(0, 0))
-			elif tile_type == TileType.WALL:
-				if _is_visible_wall(x, y):
-					tilemap.set_cell(Vector2i(x, y), 1, Vector2i(0, 0))
+
+	var pad: int = 6
+	for y in range(-pad, MAP_HEIGHT + pad):
+		for x in range(-pad, MAP_WIDTH + pad):
+			if _in_bounds(x, y):
+				var tile_type = grid[y][x]
+				if tile_type == TileType.FLOOR:
+					tilemap.set_cell(Vector2i(x, y), 0, Vector2i(0, 0))
+				elif tile_type == TileType.WALL:
+					if _is_visible_wall(x, y):
+						tilemap.set_cell(Vector2i(x, y), 1, Vector2i(0, 0))
+					else:
+						tilemap.set_cell(Vector2i(x, y), 2, Vector2i(0, 0))
+			else:
+				tilemap.set_cell(Vector2i(x, y), 2, Vector2i(0, 0))
 
 
 func _is_visible_wall(x: int, y: int) -> bool:

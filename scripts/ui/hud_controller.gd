@@ -12,12 +12,29 @@ var _souls_label: Label
 var _pickup_label: Label
 var _pickup_timer: float = 0.0
 
+# XP 条
+var _xp_bar_bg: ColorRect
+var _xp_bar_fill: ColorRect
+var _xp_label: Label
+var _level_label: Label
+
+# 技能图标
+var _skill_u_panel: Control
+var _skill_l_panel: Control
+var _skill_u_cd_overlay: ColorRect
+var _skill_l_cd_overlay: ColorRect
+var _skill_u_label: Label
+var _skill_l_label: Label
+
 # 多人模式下其他玩家的 HP 条（peer_id -> {bar, fill, label}）
 var _mp_player_bars: Dictionary = {}
 var _mp_bar_container: VBoxContainer = null
 
 const BAR_WIDTH = 100
 const BAR_HEIGHT = 10
+const XP_BAR_WIDTH = 100
+const XP_BAR_HEIGHT = 5
+const SKILL_ICON_SIZE = 22
 
 
 func _ready() -> void:
@@ -25,7 +42,10 @@ func _ready() -> void:
 	GameManager.floor_changed.connect(_on_floor_changed)
 	GameManager.gold_changed.connect(_on_gold_changed)
 	GameManager.souls_changed.connect(_on_souls_changed)
+	GameManager.xp_changed.connect(_on_xp_changed)
 	_build_hud()
+	_build_xp_bar()
+	_build_skill_icons()
 	_update_floor_display()
 	_update_gold_display()
 	_update_souls_display()
@@ -148,13 +168,130 @@ func _build_hud() -> void:
 		add_child(_mp_bar_container)
 
 
+func _build_xp_bar() -> void:
+	var xp_container = HBoxContainer.new()
+	xp_container.position = Vector2(8, 18)
+	xp_container.add_theme_constant_override("separation", 4)
+	add_child(xp_container)
+
+	_level_label = Label.new()
+	_level_label.text = "Lv.1"
+	UITheme.style_label(_level_label, UITheme.FONT_SIZE_TINY, Color(0.6, 0.9, 0.4))
+	xp_container.add_child(_level_label)
+
+	var bar_ctrl = Control.new()
+	bar_ctrl.custom_minimum_size = Vector2(XP_BAR_WIDTH, XP_BAR_HEIGHT + 4)
+	xp_container.add_child(bar_ctrl)
+
+	_xp_bar_bg = ColorRect.new()
+	_xp_bar_bg.size = Vector2(XP_BAR_WIDTH, XP_BAR_HEIGHT)
+	_xp_bar_bg.position = Vector2(0, 2)
+	_xp_bar_bg.color = Color(0.1, 0.15, 0.08, 0.8)
+	bar_ctrl.add_child(_xp_bar_bg)
+
+	_xp_bar_fill = ColorRect.new()
+	_xp_bar_fill.size = Vector2(0, XP_BAR_HEIGHT)
+	_xp_bar_fill.position = Vector2(0, 2)
+	_xp_bar_fill.color = UITheme.COLORS["xp_green"]
+	bar_ctrl.add_child(_xp_bar_fill)
+
+	_xp_label = Label.new()
+	_xp_label.text = "0/35"
+	_xp_label.position = Vector2(0, -1)
+	_xp_label.size = Vector2(XP_BAR_WIDTH, XP_BAR_HEIGHT + 4)
+	_xp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_xp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UITheme.style_label(_xp_label, UITheme.FONT_SIZE_TINY, Color.WHITE)
+	bar_ctrl.add_child(_xp_label)
+
+
+func _build_skill_icons() -> void:
+	var cls: int = GameManager.current_class
+	var skill_u_id: String = SkillDatabase.get_skill_for_slot(cls, SkillDatabase.SkillSlot.SKILL_U)
+	var skill_l_id: String = SkillDatabase.get_skill_for_slot(cls, SkillDatabase.SkillSlot.SKILL_L)
+
+	# 底部偏左的位置放技能图标
+	var skill_row = HBoxContainer.new()
+	skill_row.anchor_left = 0.0
+	skill_row.anchor_top = 1.0
+	skill_row.anchor_bottom = 1.0
+	skill_row.offset_left = 8
+	skill_row.offset_top = -38
+	skill_row.offset_bottom = -18
+	skill_row.add_theme_constant_override("separation", 6)
+	add_child(skill_row)
+
+	_skill_u_panel = _create_skill_slot(skill_u_id, "U")
+	skill_row.add_child(_skill_u_panel)
+
+	_skill_l_panel = _create_skill_slot(skill_l_id, "L")
+	skill_row.add_child(_skill_l_panel)
+
+
+func _create_skill_slot(skill_id: String, key: String) -> Control:
+	var container = Control.new()
+	container.custom_minimum_size = Vector2(SKILL_ICON_SIZE + 14, SKILL_ICON_SIZE + 6)
+
+	# 背景
+	var bg = ColorRect.new()
+	bg.size = Vector2(SKILL_ICON_SIZE, SKILL_ICON_SIZE)
+	bg.position = Vector2(0, 0)
+	bg.color = Color(0.12, 0.10, 0.18, 0.85)
+	container.add_child(bg)
+
+	# 边框
+	var border = ColorRect.new()
+	border.size = Vector2(SKILL_ICON_SIZE + 2, SKILL_ICON_SIZE + 2)
+	border.position = Vector2(-1, -1)
+	border.color = Color(0.4, 0.35, 0.55, 0.7)
+	border.z_index = -1
+	container.add_child(border)
+
+	# 技能图标
+	var icon_lbl = Label.new()
+	if skill_id != "" and SkillDatabase.ACTIVE_SKILLS.has(skill_id):
+		icon_lbl.text = SkillDatabase.ACTIVE_SKILLS[skill_id]["icon"]
+	else:
+		icon_lbl.text = "?"
+	icon_lbl.position = Vector2(2, 0)
+	icon_lbl.size = Vector2(SKILL_ICON_SIZE - 2, SKILL_ICON_SIZE)
+	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UITheme.style_label(icon_lbl, UITheme.FONT_SIZE_SMALL, Color.WHITE)
+	container.add_child(icon_lbl)
+
+	# 冷却遮罩
+	var cd_overlay = ColorRect.new()
+	cd_overlay.size = Vector2(SKILL_ICON_SIZE, 0)
+	cd_overlay.position = Vector2(0, SKILL_ICON_SIZE)
+	cd_overlay.color = Color(0.0, 0.0, 0.0, 0.6)
+	cd_overlay.visible = false
+	container.add_child(cd_overlay)
+
+	# 按键提示
+	var key_lbl = Label.new()
+	key_lbl.text = key
+	key_lbl.position = Vector2(SKILL_ICON_SIZE + 1, SKILL_ICON_SIZE - 8)
+	UITheme.style_label(key_lbl, UITheme.FONT_SIZE_TINY, Color(0.7, 0.65, 0.8, 0.6))
+	container.add_child(key_lbl)
+
+	if key == "U":
+		_skill_u_cd_overlay = cd_overlay
+		_skill_u_label = icon_lbl
+	else:
+		_skill_l_cd_overlay = cd_overlay
+		_skill_l_label = icon_lbl
+
+	return container
+
+
 func _get_class_tip(cls: int) -> String:
 	match cls:
-		GameManager.PlayerClass.WARRIOR: return "WASD移动  J=宽弧挥砍  K=翻滚闪避  I=背包"
-		GameManager.PlayerClass.MAGE:    return "WASD移动  J=追踪魔法弹  K=短距闪现  I=背包"
-		GameManager.PlayerClass.RANGER:  return "WASD移动  J=穿透箭矢(可移动射)  K=侧步闪避  I=背包"
-		GameManager.PlayerClass.ROGUE:   return "WASD移动  J=二连斩  K=穿刺冲锋(造成伤害)  I=背包"
-	return "WASD移动  J攻击  K闪避  I背包"
+		GameManager.PlayerClass.WARRIOR: return "WASD移动  J攻击  K闪避  U/L技能  I背包"
+		GameManager.PlayerClass.MAGE:    return "WASD移动  J攻击  K闪避  U/L技能  I背包"
+		GameManager.PlayerClass.RANGER:  return "WASD移动  J攻击  K闪避  U/L技能  I背包"
+		GameManager.PlayerClass.ROGUE:   return "WASD移动  J攻击  K闪避  U/L技能  I背包"
+	return "WASD移动  J攻击  K闪避  U/L技能  I背包"
 
 
 func _process(delta: float) -> void:
@@ -163,6 +300,8 @@ func _process(delta: float) -> void:
 		if _player and _player.stats:
 			_player.stats.hp_changed.connect(_on_hp_changed)
 			_update_hp_display(_player.stats.current_hp, _player.stats.get_total_max_hp())
+			if _player.skill_manager:
+				_player.skill_manager.skill_cooldown_changed.connect(_on_skill_cd_changed)
 	elif _player and _player.stats:
 		_update_hp_display(_player.stats.current_hp, _player.stats.get_total_max_hp())
 
@@ -294,3 +433,29 @@ func show_pickup_text(text: String, color: Color = Color.WHITE) -> void:
 	_pickup_label.add_theme_color_override("font_color", color)
 	_pickup_label.modulate.a = 1.0
 	_pickup_timer = 2.0
+
+
+func _on_xp_changed(current_xp: int, required_xp: int) -> void:
+	if _player and _player.stats:
+		_level_label.text = "Lv.%d" % _player.stats.level
+	var ratio: float = float(current_xp) / float(maxi(required_xp, 1))
+	_xp_bar_fill.size.x = XP_BAR_WIDTH * ratio
+	_xp_label.text = "%d/%d" % [current_xp, required_xp]
+
+
+func _on_skill_cd_changed(slot: int, remaining: float, total: float) -> void:
+	var overlay: ColorRect
+	if slot == SkillDatabase.SkillSlot.SKILL_U:
+		overlay = _skill_u_cd_overlay
+	else:
+		overlay = _skill_l_cd_overlay
+	if not overlay:
+		return
+	if remaining <= 0.0:
+		overlay.visible = false
+		return
+	overlay.visible = true
+	var ratio: float = remaining / maxf(total, 0.01)
+	var h: float = SKILL_ICON_SIZE * ratio
+	overlay.size = Vector2(SKILL_ICON_SIZE, h)
+	overlay.position = Vector2(0, SKILL_ICON_SIZE - h)

@@ -57,12 +57,14 @@ func join_server(ip: String) -> Error:
 
 
 func disconnect_all() -> void:
-	if multiplayer.multiplayer_peer:
-		multiplayer.multiplayer_peer.close()
-		multiplayer.multiplayer_peer = null
+	var peer = multiplayer.multiplayer_peer
+	if peer is ENetMultiplayerPeer:
+		peer.close()
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	player_info.clear()
 	_dead_peers.clear()
 	is_hosting = false
+	GameManager.player_nodes.clear()
 	lobby_state_changed.emit()
 
 
@@ -178,13 +180,16 @@ func _on_connected_to_server() -> void:
 
 
 func _on_connection_failed() -> void:
-	multiplayer.multiplayer_peer = null
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	connection_failed.emit()
 
 
 func _on_server_disconnected() -> void:
-	multiplayer.multiplayer_peer = null
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	player_info.clear()
+	_dead_peers.clear()
+	is_hosting = false
+	GameManager.player_nodes.clear()
 	host_disconnected.emit()
 
 

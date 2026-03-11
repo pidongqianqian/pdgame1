@@ -6,6 +6,8 @@ signal run_started
 signal run_ended(success: bool)
 signal gold_changed(amount: int)
 signal souls_changed(amount: int)
+signal xp_changed(current_xp: int, required_xp: int)
+signal level_up(new_level: int)
 
 enum GameState { TITLE, CLASS_SELECT, HUB, DUNGEON, PAUSED, GAME_OVER }
 enum PlayerClass { WARRIOR, MAGE, RANGER, ROGUE }
@@ -113,4 +115,7 @@ func spend_souls(amount: int) -> bool:
 
 
 func get_luck_modifier() -> float:
-	return 1.0 + (permanent_upgrades["luck_bonus"] * 0.05) + (current_floor - 1) * 0.02
+	var base: float = 1.0 + (permanent_upgrades["luck_bonus"] * 0.05) + (current_floor - 1) * 0.02
+	if player_node and is_instance_valid(player_node) and player_node.get("stats") != null:
+		base += player_node.stats.get_passive_value("luck_bonus")
+	return base

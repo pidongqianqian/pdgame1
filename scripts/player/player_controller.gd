@@ -30,13 +30,13 @@ var _rogue_hit_timer: float = 0.0
 @onready var camera: Camera2D = $Camera2D
 
 var _idle_texture: Texture2D
-var _attack_texture: Texture2D
-var _walk_textures: Array[Texture2D] = []
-var _walk_frame: int = 0
 var _walk_anim_timer: float = 0.0
-const WALK_ANIM_SPEED = 0.15
+const WALK_ANIM_SPEED = 0.12
 
 var _class_color: Color = Color.WHITE
+var _weapon_sprite: Sprite2D
+var _weapon_base_offset: Vector2 = Vector2(6, 0)
+var skill_manager: SkillManager
 
 var initial_class: int = -1  # 多人模式下由 game_world 指定
 
@@ -67,53 +67,130 @@ func _ready() -> void:
 
 	_load_textures()
 	_apply_class_visuals()
-	_create_player_light()
+	_create_weapon_sprite()
+	_setup_skill_manager()
 
 
 func _apply_class_visuals() -> void:
 	var cd = GameManager.CLASS_DATA[GameManager.current_class]
 	_class_color = cd["color"]
-	sprite.modulate = _class_color
+	sprite.modulate = Color.WHITE
 
-
-func _create_player_light() -> void:
-	var light = PointLight2D.new()
-	light.texture = _generate_light_texture()
-	light.energy = 0.6
-	light.texture_scale = 3.5
-	light.color = _class_color if _class_color != Color.WHITE else Color(1.0, 0.92, 0.75)
-	light.blend_mode = PointLight2D.BLEND_MODE_ADD
-	add_child(light)
-
-
-func _generate_light_texture() -> GradientTexture2D:
-	var tex = GradientTexture2D.new()
-	tex.fill = GradientTexture2D.FILL_RADIAL
-	tex.fill_from = Vector2(0.5, 0.5)
-	tex.fill_to = Vector2(0.5, 0.0)
-	var gradient = Gradient.new()
-	gradient.add_point(0.0, Color(1, 1, 1, 1))
-	gradient.add_point(0.5, Color(1, 1, 1, 0.4))
-	gradient.add_point(1.0, Color(1, 1, 1, 0))
-	tex.gradient = gradient
-	tex.width = 64
-	tex.height = 64
-	return tex
 
 
 func _load_textures() -> void:
-	_idle_texture   = load("res://assets/sprites/player/player_idle.png")
-	_attack_texture = load("res://assets/sprites/player/player_attack.png")
-	var w1 = load("res://assets/sprites/player/player_walk1.png")
-	var w2 = load("res://assets/sprites/player/player_walk2.png")
-	if w1: _walk_textures.append(w1)
-	if _idle_texture: _walk_textures.append(_idle_texture)
-	if w2: _walk_textures.append(w2)
-	if _idle_texture: _walk_textures.append(_idle_texture)
+	var cls: int = GameManager.current_class
+	var path_map: Dictionary = {
+		GameManager.PlayerClass.WARRIOR: "res://assets/sprites/player/warrior.png",
+		GameManager.PlayerClass.MAGE:    "res://assets/sprites/player/mage.png",
+		GameManager.PlayerClass.RANGER:  "res://assets/sprites/player/ranger.png",
+		GameManager.PlayerClass.ROGUE:   "res://assets/sprites/player/rogue.png",
+	}
+	var path: String = path_map.get(cls, "res://assets/sprites/player/warrior.png")
+	_idle_texture = load(path)
+	if _idle_texture:
+		sprite.texture = _idle_texture
+
+
+func _create_weapon_sprite() -> void:
+	_weapon_sprite = Sprite2D.new()
+	_weapon_sprite.z_index = 1
+	var weapon_map: Dictionary = {
+		GameManager.PlayerClass.WARRIOR: "res://assets/sprites/items/sword_icon.png",
+		GameManager.PlayerClass.MAGE:    "res://assets/sprites/items/staff.png",
+		GameManager.PlayerClass.RANGER:  "res://assets/sprites/items/bow.png",
+		GameManager.PlayerClass.ROGUE:   "res://assets/sprites/items/dagger.png",
+	}
+	var tex_path: String = weapon_map.get(GameManager.current_class, "res://assets/sprites/items/sword_icon.png")
+	var tex = load(tex_path)
+	if tex:
+		_weapon_sprite.texture = tex
+	_weapon_sprite.scale = Vector2(0.7, 0.7)
+	add_child(_weapon_sprite)
+	_update_weapon_transform()
+
+
+func _setup_skill_manager() -> void:
+	skill_manager = SkillManager.new()
+	skill_manager.name = "SkillManager"
+	skill_manager.setup(self)
+	add_child(skill_manager)
+
+
+func _check_skill_input() -> void:
+	if current_state == State.DEAD or current_state == State.HURT:
+		return
+	if Input.is_action_just_pressed("skill_1"):
+		if skill_manager and skill_manager.can_use_skill(SkillDatabase.SkillSlot.SKILL_U):
+			skill_manager.use_skill(SkillDatabase.SkillSlot.SKILL_U)
+			if NetworkManager.is_multiplayer_active():
+				_rpc_broadcast_skill.rpc(SkillDatabase.SkillSlot.SKILL_U, global_position, facing_direction)
+	if Input.is_action_just_pressed("skill_2"):
+		if skill_manager and skill_manager.can_use_skill(SkillDatabase.SkillSlot.SKILL_L):
+			skill_manager.use_skill(SkillDatabase.SkillSlot.SKILL_L)
+			if NetworkManager.is_multiplayer_active():
+				_rpc_broadcast_skill.rpc(SkillDatabase.SkillSlot.SKILL_L, global_position, facing_direction)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_broadcast_skill(slot: int, pos: Vector2, dir: Vector2) -> void:
+	global_position = pos
+	facing_direction = dir
+	if skill_manager:
+		var peer_cls: int = initial_class if initial_class >= 0 else GameManager.current_class
+		var skill_id: String = SkillDatabase.get_skill_for_slot(peer_cls, slot)
+		if skill_id == "":
+			return
+		var data: Dictionary = SkillDatabase.ACTIVE_SKILLS[skill_id]
+		skill_manager._execute_skill(skill_id, data)
+
+
+func _update_weapon_transform() -> void:
+	if not _weapon_sprite:
+		return
+	if current_state == State.DEAD:
+		_weapon_sprite.visible = false
+		return
+	_weapon_sprite.visible = true
+
+	var cls: int = GameManager.current_class
+	var offset: Vector2
+	var rot: float
+
+	if abs(facing_direction.x) >= abs(facing_direction.y):
+		if facing_direction.x >= 0:
+			offset = Vector2(7, 1)
+			rot = deg_to_rad(-45)
+			_weapon_sprite.flip_h = false
+			_weapon_sprite.z_index = 1
+		else:
+			offset = Vector2(-7, 1)
+			rot = deg_to_rad(45)
+			_weapon_sprite.flip_h = true
+			_weapon_sprite.z_index = 1
+	else:
+		if facing_direction.y > 0:
+			offset = Vector2(5, 4)
+			rot = deg_to_rad(-20)
+			_weapon_sprite.z_index = 1
+		else:
+			offset = Vector2(-5, -2)
+			rot = deg_to_rad(30)
+			_weapon_sprite.z_index = -1
+
+	if cls == GameManager.PlayerClass.MAGE:
+		offset *= 0.85
+		rot += deg_to_rad(15)
+	elif cls == GameManager.PlayerClass.RANGER:
+		rot += deg_to_rad(10)
+
+	_weapon_sprite.position = offset
+	_weapon_sprite.rotation = rot
 
 
 func _physics_process(delta: float) -> void:
 	_update_timers(delta)
+	_update_weapon_transform()
 	match current_state:
 		State.IDLE:   _state_idle()
 		State.MOVE:   _state_move(delta)
@@ -121,7 +198,6 @@ func _physics_process(delta: float) -> void:
 		State.DODGE:  _state_dodge(delta)
 		State.HURT:   _state_hurt(delta)
 		State.DEAD:
-			# 多人观战：仍可移动（半透明幽灵状态）
 			if NetworkManager.is_multiplayer_active() and is_multiplayer_authority():
 				var dir = _get_input_direction()
 				velocity = dir * stats.speed * 0.6
@@ -149,6 +225,8 @@ func _get_input_direction() -> Vector2:
 
 func _state_idle() -> void:
 	velocity = Vector2.ZERO
+	sprite.position = Vector2.ZERO
+	sprite.scale = Vector2.ONE
 	if _idle_texture:
 		sprite.texture = _idle_texture
 	var dir = _get_input_direction()
@@ -163,6 +241,7 @@ func _state_idle() -> void:
 	if Input.is_action_just_pressed("dodge") and _dodge_cooldown_timer <= 0:
 		_start_dodge()
 		return
+	_check_skill_input()
 	_update_sprite_direction()
 
 
@@ -182,12 +261,12 @@ func _state_move(delta: float) -> void:
 
 	velocity = dir * stats.get_total_speed()
 
+	# 弹跳走路动画
 	_walk_anim_timer += delta
-	if _walk_anim_timer >= WALK_ANIM_SPEED:
-		_walk_anim_timer = 0.0
-		_walk_frame = (_walk_frame + 1) % _walk_textures.size()
-		if not _walk_textures.is_empty():
-			sprite.texture = _walk_textures[_walk_frame]
+	var bob: float = sin(_walk_anim_timer / WALK_ANIM_SPEED * PI) * 1.5
+	sprite.position.y = -abs(bob)
+	sprite.scale.x = 1.0 + sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
+	sprite.scale.y = 1.0 - sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
 
 	if Input.is_action_just_pressed("attack") and _attack_cooldown_timer <= 0:
 		_start_attack()
@@ -195,6 +274,7 @@ func _state_move(delta: float) -> void:
 	if Input.is_action_just_pressed("dodge") and _dodge_cooldown_timer <= 0:
 		_start_dodge()
 		return
+	_check_skill_input()
 	_update_sprite_direction()
 
 
@@ -214,10 +294,10 @@ func _start_attack() -> void:
 func _attack_warrior() -> void:
 	current_state = State.ATTACK
 	_attack_timer = stats.attack_cooldown
-	velocity = facing_direction * 3.0  # 轻微前冲
-	if _attack_texture: sprite.texture = _attack_texture
+	velocity = facing_direction * 3.0
+	sprite.position = Vector2.ZERO
+	sprite.scale = Vector2.ONE
 
-	# 宽大攻击范围
 	attack_area.position = facing_direction * 12
 	var rect = attack_shape.shape as RectangleShape2D
 	if rect:
@@ -226,26 +306,25 @@ func _attack_warrior() -> void:
 	attack_shape.disabled = false
 
 	_spawn_warrior_slash()
+	_animate_weapon_swing(0.3, 120.0)
 	_camera_shake(2.5, 0.12)
 
 	var tween = create_tween()
 	tween.tween_property(sprite, "position", facing_direction * 3.0, 0.06)
 	tween.tween_property(sprite, "position", Vector2.ZERO, 0.12)
 
-	_deal_attack_damage(stats.get_total_attack(), 1.5)  # 1.5x 击退
+	_deal_attack_damage(stats.get_total_attack(), 1.5)
 	_attack_cooldown_timer = stats.attack_cooldown
 
 
 # ── 法师：发射追踪魔法弹 ──────────────────────────────────────
 func _attack_mage() -> void:
 	_attack_cooldown_timer = stats.attack_cooldown
-	if _attack_texture: sprite.texture = _attack_texture
-
-	# 法师攻击不锁动作，可以边移动边释放
 	var tween = create_tween()
 	tween.tween_property(sprite, "scale", Vector2(1.2, 1.2), 0.06)
 	tween.tween_property(sprite, "scale", Vector2(1.0, 1.0), 0.08)
 
+	_animate_weapon_thrust(0.2)
 	_spawn_magic_orb(facing_direction, stats.get_total_attack())
 	_camera_shake(1.0, 0.08)
 
@@ -265,18 +344,18 @@ func _spawn_magic_orb(dir: Vector2, dmg: int) -> void:
 
 	orb.global_position = global_position + dir * 8
 	get_parent().add_child(orb)
-	orb.setup(dir, dmg, 110.0, 2, self)
+	orb.setup(dir, dmg, 90.0, 2, self)
 
 
 # ── 游侠：射出穿透长箭 ────────────────────────────────────────
 func _attack_ranger() -> void:
 	_attack_cooldown_timer = stats.attack_cooldown
-	if _attack_texture: sprite.texture = _attack_texture
 
 	var tween = create_tween()
-	tween.tween_property(sprite, "position", -facing_direction * 1.5, 0.05)  # 蓄力后仰
+	tween.tween_property(sprite, "position", -facing_direction * 1.5, 0.05)
 	tween.tween_property(sprite, "position", Vector2.ZERO, 0.08)
 
+	_animate_weapon_thrust(0.18)
 	_spawn_arrow(facing_direction, stats.get_total_attack())
 
 
@@ -296,7 +375,7 @@ func _spawn_arrow(dir: Vector2, dmg: int) -> void:
 
 	arrow.global_position = global_position + dir * 10
 	get_parent().add_child(arrow)
-	arrow.setup(dir, dmg, 160.0, 2, self)
+	arrow.setup(dir, dmg, 130.0, 2, self)
 
 
 # ── 刺客：极速二连斩 ──────────────────────────────────────────
@@ -304,10 +383,9 @@ func _attack_rogue() -> void:
 	current_state = State.ATTACK
 	_attack_timer = stats.attack_cooldown * 0.7
 	velocity = facing_direction * 5.0
+	sprite.position = Vector2.ZERO
+	sprite.scale = Vector2.ONE
 
-	if _attack_texture: sprite.texture = _attack_texture
-
-	# 第一斩（左偏）
 	var left_offset = Vector2(-facing_direction.y, facing_direction.x) * 5
 	attack_area.position = facing_direction * 12 + left_offset
 	var rect = attack_shape.shape as RectangleShape2D
@@ -316,16 +394,17 @@ func _attack_rogue() -> void:
 	attack_shape.disabled = false
 
 	_spawn_rogue_slash(left_offset, Color(1.0, 0.6, 0.2))
+	_animate_weapon_swing(0.12, 80.0)
 	_deal_attack_damage(int(stats.get_total_attack() * 0.7), 0.8)
 	_attack_cooldown_timer = stats.attack_cooldown
 
-	# 0.12秒后第二斩（右偏）
 	await get_tree().create_timer(0.12).timeout
 	if not is_instance_valid(self) or current_state == State.DEAD: return
 
 	var right_offset = Vector2(facing_direction.y, -facing_direction.x) * 5
 	attack_area.position = facing_direction * 12 + right_offset
 	_spawn_rogue_slash(right_offset, Color(1.0, 0.85, 0.3))
+	_animate_weapon_swing(0.12, -80.0)
 	_deal_attack_damage(int(stats.get_total_attack() * 0.9), 1.0)
 	_camera_shake(2.0, 0.10)
 	_freeze_frame(0.03)
@@ -354,6 +433,12 @@ func _deal_attack_damage(dmg: int, knockback_mult: float = 1.0) -> void:
 	await get_tree().physics_frame
 	if not is_instance_valid(self) or current_state == State.DEAD:
 		return
+	# 暴击判定
+	var crit: bool = false
+	var crit_chance: float = stats.get_passive_value("crit_chance")
+	if crit_chance > 0.0 and randf() < crit_chance:
+		crit = true
+		dmg *= 2
 	var bodies = attack_area.get_overlapping_bodies()
 	var hit_any = false
 	for body in bodies:
@@ -361,6 +446,8 @@ func _deal_attack_damage(dmg: int, knockback_mult: float = 1.0) -> void:
 			var dir = global_position.direction_to(body.global_position)
 			(body as EnemyBase).take_damage(dmg, dir * knockback_mult)
 			_spawn_hit_effect(body.global_position)
+			if crit:
+				_show_crit_text(body.global_position)
 			hit_any = true
 	if hit_any and GameManager.current_class != GameManager.PlayerClass.ROGUE:
 		_camera_shake(2.0, 0.12)
@@ -442,7 +529,7 @@ func _dodge_mage() -> void:
 
 	sprite.modulate = Color(0.8, 0.5, 1.0, 0.6)
 	var tween = create_tween()
-	tween.tween_property(sprite, "modulate", _class_color, 0.25)
+	tween.tween_property(sprite, "modulate", Color.WHITE, 0.25)
 
 
 func _spawn_blink_effect(pos: Vector2) -> void:
@@ -516,7 +603,7 @@ func _state_dodge(delta: float) -> void:
 	if _dodge_timer <= 0:
 		_dodge_cooldown_timer = stats.dodge_cooldown
 		is_invincible = false
-		sprite.modulate = _class_color
+		sprite.modulate = Color.WHITE
 		current_state = State.IDLE
 		# 游侠/战士保持部分速度
 		if GameManager.current_class == GameManager.PlayerClass.RANGER:
@@ -560,6 +647,19 @@ func _apply_damage(amount: int, knockback_dir: Vector2) -> void:
 	if is_invincible or current_state == State.DEAD or current_state == State.DODGE:
 		return
 	var actual = stats.take_damage(amount)
+	if actual == 0:
+		_show_evade_text()
+		return
+	# 荆棘反弹
+	var thorns_pct: float = stats.get_passive_value("thorns_percent")
+	if thorns_pct > 0.0 and knockback_dir != Vector2.ZERO:
+		var thorns_dmg: int = maxi(1, int(actual * thorns_pct))
+		var attacker_pos: Vector2 = global_position - knockback_dir.normalized() * 20
+		var enemies = get_tree().get_nodes_in_group("enemies")
+		for e in enemies:
+			if is_instance_valid(e) and e.global_position.distance_to(attacker_pos) < 24:
+				(e as EnemyBase).take_damage(thorns_dmg, -knockback_dir)
+				break
 	is_invincible = true
 	_invincible_timer = stats.invincible_duration
 	if knockback_dir != Vector2.ZERO:
@@ -576,7 +676,7 @@ func _state_hurt(delta: float) -> void:
 	_hurt_timer -= delta
 	velocity = velocity.move_toward(Vector2.ZERO, 400 * delta)
 	if _hurt_timer <= 0:
-		sprite.modulate = _class_color
+		sprite.modulate = Color.WHITE
 		current_state = State.IDLE
 
 
@@ -586,7 +686,7 @@ func _update_invincibility(delta: float) -> void:
 		sprite.modulate.a = 0.35 if fmod(_invincible_timer, 0.1) < 0.05 else 1.0
 		if _invincible_timer <= 0:
 			is_invincible = false
-			sprite.modulate = _class_color
+			sprite.modulate = Color.WHITE
 
 
 func _on_died() -> void:
@@ -619,14 +719,48 @@ func _enter_spectate_mode() -> void:
 func revive() -> void:
 	if current_state != State.DEAD:
 		return
-	stats.hp = stats.max_hp / 2
+	stats.current_hp = stats.max_hp / 2
+	stats.hp_changed.emit(stats.current_hp, stats.get_total_max_hp())
 	current_state = State.IDLE
 	is_invincible = false
 	_invincible_timer = 0.0
 	collision_shape.disabled = false
 	hurtbox.monitoring = true
 	var tween = create_tween()
-	tween.tween_property(sprite, "modulate", _class_color, 0.4)
+	tween.tween_property(sprite, "modulate", Color.WHITE, 0.4)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 武器动画
+# ═══════════════════════════════════════════════════════════════
+
+func _animate_weapon_swing(duration: float, arc_degrees: float) -> void:
+	if not _weapon_sprite:
+		return
+	var start_rot: float = _weapon_sprite.rotation - deg_to_rad(arc_degrees * 0.4)
+	var end_rot: float = _weapon_sprite.rotation + deg_to_rad(arc_degrees * 0.6)
+	var forward_offset: Vector2 = facing_direction * 4
+
+	var tween = create_tween()
+	tween.tween_property(_weapon_sprite, "rotation", start_rot, duration * 0.15).set_trans(Tween.TRANS_QUAD)
+	tween.tween_property(_weapon_sprite, "rotation", end_rot, duration * 0.35).set_trans(Tween.TRANS_BACK)
+	tween.parallel().tween_property(_weapon_sprite, "position",
+		_weapon_sprite.position + forward_offset, duration * 0.35).set_trans(Tween.TRANS_QUAD)
+	tween.tween_property(_weapon_sprite, "position",
+		_weapon_sprite.position, duration * 0.5).set_trans(Tween.TRANS_QUAD)
+
+
+func _animate_weapon_thrust(duration: float) -> void:
+	if not _weapon_sprite:
+		return
+	var thrust_offset: Vector2 = facing_direction * 6
+	var base_pos: Vector2 = _weapon_sprite.position
+
+	var tween = create_tween()
+	tween.tween_property(_weapon_sprite, "position",
+		base_pos + thrust_offset, duration * 0.3).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(_weapon_sprite, "position",
+		base_pos, duration * 0.7).set_trans(Tween.TRANS_QUAD)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -687,6 +821,34 @@ func _update_sprite_direction() -> void:
 		sprite.flip_h = true
 	elif facing_direction.x > 0:
 		sprite.flip_h = false
+
+
+func _show_evade_text() -> void:
+	var label = Label.new()
+	label.text = "闪避!"
+	label.add_theme_font_size_override("font_size", 6)
+	label.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
+	label.position = Vector2(-6, -18)
+	label.z_index = 101
+	add_child(label)
+	var tween = create_tween()
+	tween.tween_property(label, "position:y", label.position.y - 12, 0.5)
+	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(label.queue_free)
+
+
+func _show_crit_text(pos: Vector2) -> void:
+	var label = Label.new()
+	label.text = "暴击!"
+	label.add_theme_font_size_override("font_size", 7)
+	label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.1))
+	label.global_position = pos + Vector2(-8, -20)
+	label.z_index = 101
+	get_parent().add_child(label)
+	var tween = create_tween()
+	tween.tween_property(label, "position:y", label.position.y - 16, 0.6)
+	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(label.queue_free)
 
 
 func _show_damage_number(amount: int) -> void:

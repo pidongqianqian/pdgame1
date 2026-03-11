@@ -60,4 +60,28 @@ func generate_loot(is_boss: bool = false) -> Array[Dictionary]:
 			var item = ItemDatabase.generate_item(rarity, GameManager.current_floor)
 			drops.append(item)
 
+	# 技能卷轴掉落（稀有度>=Rare时5%几率）
+	if not drops.is_empty():
+		var best_rarity: int = 0
+		for d in drops:
+			best_rarity = maxi(best_rarity, d.get("rarity", 0))
+		if best_rarity >= 2 and randf() < 0.05:
+			drops.append(_make_skill_scroll())
+
 	return drops
+
+
+func _make_skill_scroll() -> Dictionary:
+	var passives = SkillDatabase.get_random_passives(1)
+	var pid: String = passives[0] if passives.size() > 0 else "power"
+	var pdata: Dictionary = SkillDatabase.PASSIVE_TALENTS[pid]
+	return {
+		"name": "天赋卷轴·%s" % pdata["name"],
+		"rarity": 2,
+		"rarity_name": "稀有",
+		"color": Color(0.3, 0.5, 1.0),
+		"slot": -1,
+		"type": "skill_scroll",
+		"passive_id": pid,
+		"desc": pdata["desc"],
+	}

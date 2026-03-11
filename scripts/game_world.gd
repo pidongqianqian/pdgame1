@@ -16,10 +16,16 @@ var inventory_ui: CanvasLayer
 var ambience: Node
 var enemies_alive: int = 0
 var _floor_clear_ui: CanvasLayer = null
+var _game_over_ui: CanvasLayer = null
+var _skill_select_ui: CanvasLayer = null
 
 
 func _ready() -> void:
+	GameManager.player_died.connect(_on_game_over)
+	if NetworkManager.is_multiplayer_active():
+		NetworkManager.host_disconnected.connect(_on_host_disconnected)
 	_setup_dungeon()
+	_setup_canvas_modulate()
 	_spawn_player()
 	_spawn_enemies()
 	_setup_hud()
@@ -56,6 +62,7 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 
 	var floor_tex = load("res://assets/sprites/tiles/floor.png")
 	var wall_tex  = load("res://assets/sprites/tiles/wall.png")
+	var void_tex  = load("res://assets/sprites/tiles/void.png")
 
 	if floor_tex:
 		var floor_src = TileSetAtlasSource.new()
@@ -81,8 +88,19 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 		])
 		tile_data.set_collision_polygon_points(0, 0, polygon)
 
+	if void_tex:
+		var void_src = TileSetAtlasSource.new()
+		void_src.texture = void_tex
+		void_src.texture_region_size = Vector2i(16, 16)
+		void_src.create_tile(Vector2i(0, 0))
+		ts.add_source(void_src, 2)
+
 	tilemap_layer.tile_set = ts
 	tilemap_layer.collision_enabled = true
+
+
+func _setup_canvas_modulate() -> void:
+	pass
 
 
 func _spawn_player() -> void:
@@ -182,13 +200,34 @@ func _spawn_enemies() -> void:
 func _spawn_torch_lights() -> void:
 	if not ambience or not ambience.has_method("add_torch_light"):
 		return
-	for i in range(1, dungeon.rooms.size()):
-		var center = dungeon.get_room_center(i)
-		ambience.add_torch_light(center)
-		if i == dungeon.boss_room_index:
-			# Boss 房额外两盏灯
-			ambience.add_torch_light(center + Vector2(24, 0))
-			ambience.add_torch_light(center + Vector2(-24, 0))
+
+	var ts: int = dungeon.TILE_SIZE
+	for i in range(dungeon.rooms.size()):
+		var room: Rect2i = dungeon.rooms[i]
+		var rw: int = room.size.x
+		var rh: int = room.size.y
+		var area: int = rw * rh
+
+		var left:   float = (room.position.x + 1) * ts + ts / 2.0
+		var right:  float = (room.position.x + rw - 2) * ts + ts / 2.0
+		var top:    float = (room.position.y + 1) * ts + ts / 2.0
+		var bottom: float = (room.position.y + rh - 2) * ts + ts / 2.0
+		var cx: float = (room.position.x + rw / 2.0) * ts
+		var cy: float = (room.position.y + rh / 2.0) * ts
+
+		if area >= 80:
+			ambience.add_torch_light(Vector2(left, top))
+			ambience.add_torch_light(Vector2(right, top))
+			ambience.add_torch_light(Vector2(left, bottom))
+			ambience.add_torch_light(Vector2(right, bottom))
+			ambience.add_torch_light(Vector2(cx, cy))
+		elif area >= 50:
+			ambience.add_torch_light(Vector2(left, top))
+			ambience.add_torch_light(Vector2(right, bottom))
+			ambience.add_torch_light(Vector2(cx, cy))
+		else:
+			ambience.add_torch_light(Vector2(left, cy))
+			ambience.add_torch_light(Vector2(right, cy))
 
 
 func _setup_hud() -> void:
@@ -208,11 +247,12 @@ func _setup_ambience() -> void:
 	add_child(ambience)
 
 
-func _on_enemy_died_in_room(room_index: int, enemy_pos: Vector2, is_boss: bool, gold: int) -> void:
+func _on_enemy_died_in_room(room_index: int, enemy_pos: Vector2, is_boss: bool, gold: int, xp: int = 12) -> void:
 	enemies_alive -= 1
 	dungeon.on_enemy_killed_in_room(room_index)
 	_try_spawn_loot(enemy_pos, is_boss)
 	_spawn_gold_coins(enemy_pos, gold, is_boss)
+	_grant_xp(xp)
 
 
 func _spawn_gold_coins(pos: Vector2, total_gold: int, is_boss: bool) -> void:
@@ -239,6 +279,56 @@ func _spawn_gold_coins(pos: Vector2, total_gold: int, is_boss: bool) -> void:
 		coin.position = safe_pos
 		coin.gold_amount = coin_data["amount"]
 		entities.add_child(coin)
+
+
+func _grant_xp(amount: int) -> void:
+	if NetworkManager.is_multiplayer_active():
+		# Host 给所有存活玩家分发 XP
+		if multiplayer.is_server():
+			for peer_id in GameManager.player_nodes:
+				var p: Node2D = GameManager.player_nodes[peer_id]
+				if p and is_instance_valid(p) and (p as Player).current_state != Player.State.DEAD:
+					_rpc_grant_xp.rpc_id(peer_id, amount)
+		return
+	_apply_local_xp(amount)
+
+
+@rpc("authority", "call_local", "reliable")
+func _rpc_grant_xp(amount: int) -> void:
+	_apply_local_xp(amount)
+
+
+func _apply_local_xp(amount: int) -> void:
+	if not player or not is_instance_valid(player):
+		return
+	if player.current_state == Player.State.DEAD:
+		return
+	var kill_heal: int = int(player.stats.get_passive_value("kill_heal"))
+	if kill_heal > 0:
+		player.stats.heal(kill_heal)
+	var leveled: bool = player.stats.add_xp(amount)
+	if leveled:
+		_show_level_up_select()
+
+
+func _show_level_up_select() -> void:
+	if _skill_select_ui:
+		return
+	var ui_script = load("res://scripts/ui/skill_select_ui.gd")
+	if not ui_script:
+		return
+	_skill_select_ui = CanvasLayer.new()
+	_skill_select_ui.set_script(ui_script)
+	_skill_select_ui.layer = 18
+	add_child(_skill_select_ui)
+	_skill_select_ui.setup_passive_select(player)
+	_skill_select_ui.selection_made.connect(_on_skill_selected)
+
+
+func _on_skill_selected() -> void:
+	if _skill_select_ui:
+		_skill_select_ui.queue_free()
+		_skill_select_ui = null
 
 
 func _try_spawn_loot(pos: Vector2, is_boss: bool) -> void:
@@ -273,6 +363,7 @@ const SHOP_POOL = [
 	{"name": "风之羽",     "desc": "移动速度 +15（本局）", "cost": 55,  "type": "spd",      "value": 15},
 	{"name": "神秘宝箱",   "desc": "随机普通或精良装备",   "cost": 90,  "type": "item",     "value": 1},
 	{"name": "稀有宝箱",   "desc": "随机稀有或史诗装备",   "cost": 160, "type": "item",     "value": 2},
+	{"name": "天赋卷轴",   "desc": "随机获得一个被动天赋", "cost": 100, "type": "talent",   "value": 0},
 ]
 
 
@@ -359,6 +450,16 @@ func _show_floor_clear_ui() -> void:
 	hint.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_SMALL)
 	hint.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
 	hbox.add_child(hint)
+
+	var talent_btn = Button.new()
+	talent_btn.text = "  选择天赋  ✦"
+	talent_btn.custom_minimum_size = Vector2(100, 32)
+	UITheme.style_button(talent_btn, UITheme.FONT_SIZE_BODY)
+	talent_btn.add_theme_color_override("font_color", Color(0.6, 0.9, 0.4))
+	talent_btn.add_theme_stylebox_override("normal", _make_next_btn_style(false))
+	talent_btn.add_theme_stylebox_override("hover",  _make_next_btn_style(true))
+	talent_btn.pressed.connect(_on_floor_talent_select)
+	hbox.add_child(talent_btn)
 
 	var btn = Button.new()
 	btn.text = "  进入第 %d 层  ▶" % (GameManager.current_floor + 1)
@@ -449,16 +550,25 @@ func _apply_shop_item(item: Dictionary) -> void:
 			rarity = clampi(rarity, 0, 4)
 			var new_item = ItemDatabase.generate_item(rarity, GameManager.current_floor)
 			if not player.stats.add_to_inventory(new_item):
-				# 背包满就直接装备
 				player.stats.equip_item(new_item)
-
-			# 提示
 			var hud_nodes = get_tree().get_nodes_in_group("hud")
 			if not hud_nodes.is_empty() and hud_nodes[0].has_method("show_pickup_text"):
 				hud_nodes[0].show_pickup_text(
 					"获得 [%s] %s" % [new_item.get("rarity_name",""), new_item.get("name","")],
 					new_item.get("color", Color.WHITE)
 				)
+		"talent":
+			var passives = SkillDatabase.get_random_passives(1)
+			if passives.size() > 0:
+				var pid: String = passives[0]
+				player.stats.learn_passive(pid)
+				var pdata: Dictionary = SkillDatabase.PASSIVE_TALENTS[pid]
+				var hud_nodes2 = get_tree().get_nodes_in_group("hud")
+				if not hud_nodes2.is_empty() and hud_nodes2[0].has_method("show_pickup_text"):
+					hud_nodes2[0].show_pickup_text(
+						"习得天赋 [%s] %s" % [pdata["icon"], pdata["name"]],
+						UITheme.COLORS["text_gold"]
+					)
 
 
 func _make_clear_panel() -> StyleBoxFlat:
@@ -490,6 +600,20 @@ func _make_next_btn_style(hover: bool) -> StyleBoxFlat:
 	return sb
 
 
+func _on_floor_talent_select() -> void:
+	if _skill_select_ui or not player or not is_instance_valid(player):
+		return
+	var ui_script = load("res://scripts/ui/skill_select_ui.gd")
+	if not ui_script:
+		return
+	_skill_select_ui = CanvasLayer.new()
+	_skill_select_ui.set_script(ui_script)
+	_skill_select_ui.layer = 18
+	add_child(_skill_select_ui)
+	_skill_select_ui.setup_floor_reward(player)
+	_skill_select_ui.selection_made.connect(_on_skill_selected)
+
+
 func _on_confirm_next_floor() -> void:
 	if _floor_clear_ui:
 		_floor_clear_ui.queue_free()
@@ -518,10 +642,8 @@ func _rpc_advance_floor(new_floor: int) -> void:
 
 
 func _next_floor() -> void:
-	# 清理旧火把灯光
-	for child in get_children():
-		if child is PointLight2D:
-			child.queue_free()
+	if ambience and ambience.has_method("clear_torches"):
+		ambience.clear_torches()
 
 	# 清理敌人和战利品，但保留玩家节点
 	for child in entities.get_children():
@@ -562,3 +684,263 @@ func _next_floor() -> void:
 	# 更新氛围色调
 	if ambience and ambience.has_method("_update_floor_theme"):
 		ambience._update_floor_theme()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Game Over UI
+# ═══════════════════════════════════════════════════════════════
+
+func _on_game_over() -> void:
+	# 死亡时关闭可能存在的升级选择弹窗
+	if _skill_select_ui:
+		get_tree().paused = false
+		_skill_select_ui.queue_free()
+		_skill_select_ui = null
+	await get_tree().create_timer(1.2).timeout
+	_show_game_over_ui()
+
+
+func _show_game_over_ui() -> void:
+	if _game_over_ui:
+		return
+
+	_game_over_ui = CanvasLayer.new()
+	_game_over_ui.layer = 20
+	add_child(_game_over_ui)
+
+	# 全屏半透明遮罩
+	var overlay = ColorRect.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	_game_over_ui.add_child(overlay)
+	var fade_tw = create_tween()
+	fade_tw.tween_property(overlay, "color:a", 0.55, 0.8)
+
+	# 中心面板
+	var panel = PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.offset_left = -140
+	panel.offset_right = 140
+	panel.offset_top = -90
+	panel.offset_bottom = 90
+	var panel_sb = StyleBoxFlat.new()
+	panel_sb.bg_color = Color(0.06, 0.04, 0.10, 0.95)
+	panel_sb.border_color = Color(0.7, 0.2, 0.2, 0.8)
+	panel_sb.set_border_width_all(2)
+	panel_sb.set_corner_radius_all(4)
+	panel_sb.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", panel_sb)
+	_game_over_ui.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 10)
+	panel.add_child(vbox)
+
+	# 标题
+	var title = Label.new()
+	title.text = "你已陨落"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UITheme.style_label(title, UITheme.FONT_SIZE_TITLE, Color(0.9, 0.25, 0.2))
+	vbox.add_child(title)
+
+	# 战绩摘要
+	var stats_text = "到达深渊第 %d 层  |  获得金币 %d  |  灵魂 %d" % [
+		GameManager.current_floor, GameManager.gold, GameManager.souls
+	]
+	var stats_lbl = Label.new()
+	stats_lbl.text = stats_text
+	stats_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UITheme.style_label(stats_lbl, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
+	vbox.add_child(stats_lbl)
+
+	# 分隔线
+	var sep = HSeparator.new()
+	sep.add_theme_stylebox_override("separator", _make_separator_style())
+	vbox.add_child(sep)
+
+	var is_mp: bool = NetworkManager.is_multiplayer_active()
+
+	if is_mp:
+		_build_mp_game_over_buttons(vbox)
+	else:
+		_build_sp_game_over_buttons(vbox)
+
+	# 入场动画
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.8, 0.8)
+	panel.pivot_offset = panel.size / 2
+	var tw = create_tween().set_parallel(true)
+	tw.tween_property(panel, "modulate:a", 1.0, 0.5).set_delay(0.3)
+	tw.tween_property(panel, "scale", Vector2.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_delay(0.3)
+
+
+func _build_sp_game_over_buttons(parent: VBoxContainer) -> void:
+	var btn_row = HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 12)
+	parent.add_child(btn_row)
+
+	var restart_btn = Button.new()
+	restart_btn.text = "  重新挑战  "
+	restart_btn.custom_minimum_size = Vector2(110, 30)
+	UITheme.style_button(restart_btn, UITheme.FONT_SIZE_BODY)
+	restart_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+	restart_btn.add_theme_stylebox_override("normal", _make_gameover_btn_style(Color(0.22, 0.16, 0.04), Color(0.8, 0.65, 0.2)))
+	restart_btn.add_theme_stylebox_override("hover", _make_gameover_btn_style(Color(0.32, 0.24, 0.06), Color(1.0, 0.85, 0.3)))
+	restart_btn.pressed.connect(_on_gameover_restart)
+	btn_row.add_child(restart_btn)
+
+	var menu_btn = Button.new()
+	menu_btn.text = "  返回主菜单  "
+	menu_btn.custom_minimum_size = Vector2(110, 30)
+	UITheme.style_button(menu_btn, UITheme.FONT_SIZE_BODY)
+	menu_btn.add_theme_stylebox_override("normal", _make_gameover_btn_style(Color(0.14, 0.10, 0.20), Color(0.4, 0.3, 0.6)))
+	menu_btn.add_theme_stylebox_override("hover", _make_gameover_btn_style(Color(0.20, 0.16, 0.28), Color(0.5, 0.4, 0.7)))
+	menu_btn.pressed.connect(_on_gameover_menu)
+	btn_row.add_child(menu_btn)
+
+
+func _build_mp_game_over_buttons(parent: VBoxContainer) -> void:
+	var is_host: bool = multiplayer.is_server()
+
+	if is_host:
+		var hint = Label.new()
+		hint.text = "你是房主，可以选择重新开始或解散房间"
+		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		UITheme.style_label(hint, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
+		parent.add_child(hint)
+
+		var btn_row = HBoxContainer.new()
+		btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		btn_row.add_theme_constant_override("separation", 12)
+		parent.add_child(btn_row)
+
+		var restart_btn = Button.new()
+		restart_btn.text = "  重新开始  "
+		restart_btn.custom_minimum_size = Vector2(110, 30)
+		UITheme.style_button(restart_btn, UITheme.FONT_SIZE_BODY)
+		restart_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+		restart_btn.add_theme_stylebox_override("normal", _make_gameover_btn_style(Color(0.22, 0.16, 0.04), Color(0.8, 0.65, 0.2)))
+		restart_btn.add_theme_stylebox_override("hover", _make_gameover_btn_style(Color(0.32, 0.24, 0.06), Color(1.0, 0.85, 0.3)))
+		restart_btn.pressed.connect(_on_gameover_mp_restart)
+		btn_row.add_child(restart_btn)
+
+		var disband_btn = Button.new()
+		disband_btn.text = "  解散房间  "
+		disband_btn.custom_minimum_size = Vector2(110, 30)
+		UITheme.style_button(disband_btn, UITheme.FONT_SIZE_BODY)
+		disband_btn.add_theme_stylebox_override("normal", _make_gameover_btn_style(Color(0.20, 0.06, 0.06), Color(0.6, 0.2, 0.2)))
+		disband_btn.add_theme_stylebox_override("hover", _make_gameover_btn_style(Color(0.28, 0.08, 0.08), Color(0.8, 0.3, 0.3)))
+		disband_btn.pressed.connect(_on_gameover_mp_disband)
+		btn_row.add_child(disband_btn)
+	else:
+		var wait_lbl = Label.new()
+		wait_lbl.text = "等待房主决定..."
+		wait_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UITheme.style_label(wait_lbl, UITheme.FONT_SIZE_BODY, Color(0.8, 0.7, 0.5))
+		wait_lbl.name = "WaitLabel"
+		parent.add_child(wait_lbl)
+
+		var leave_btn = Button.new()
+		leave_btn.text = "  退出房间  "
+		leave_btn.custom_minimum_size = Vector2(110, 30)
+		UITheme.style_button(leave_btn, UITheme.FONT_SIZE_BODY)
+		leave_btn.add_theme_stylebox_override("normal", _make_gameover_btn_style(Color(0.14, 0.10, 0.20), Color(0.4, 0.3, 0.6)))
+		leave_btn.add_theme_stylebox_override("hover", _make_gameover_btn_style(Color(0.20, 0.16, 0.28), Color(0.5, 0.4, 0.7)))
+		leave_btn.pressed.connect(_on_gameover_mp_leave)
+		parent.add_child(leave_btn)
+		leave_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+
+
+func _make_gameover_btn_style(bg: Color, border: Color) -> StyleBoxFlat:
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(6)
+	return sb
+
+
+func _make_separator_style() -> StyleBoxFlat:
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.4, 0.2, 0.2, 0.5)
+	sb.set_content_margin_all(0)
+	sb.content_margin_top = 1
+	sb.content_margin_bottom = 1
+	return sb
+
+
+func _dismiss_game_over_ui() -> void:
+	if _game_over_ui:
+		_game_over_ui.queue_free()
+		_game_over_ui = null
+
+
+func _on_host_disconnected() -> void:
+	_dismiss_game_over_ui()
+	_dismiss_floor_clear_ui()
+	NetworkManager.disconnect_all()
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("return_to_title"):
+		main_node.return_to_title()
+
+
+func _dismiss_floor_clear_ui() -> void:
+	if _floor_clear_ui:
+		_floor_clear_ui.queue_free()
+		_floor_clear_ui = null
+
+
+# ── 单人模式按钮回调 ──────────────────────────────────────────
+
+func _on_gameover_restart() -> void:
+	_dismiss_game_over_ui()
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("start_game"):
+		main_node.start_game()
+
+
+func _on_gameover_menu() -> void:
+	_dismiss_game_over_ui()
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("return_to_title"):
+		main_node.return_to_title()
+
+
+# ── 多人模式按钮回调 ──────────────────────────────────────────
+
+func _on_gameover_mp_restart() -> void:
+	NetworkManager.revive_all()
+	NetworkManager.current_dungeon_seed = randi()
+	_rpc_mp_restart.rpc(NetworkManager.current_dungeon_seed)
+
+
+func _on_gameover_mp_disband() -> void:
+	_dismiss_game_over_ui()
+	NetworkManager.disconnect_all()
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("return_to_title"):
+		main_node.return_to_title()
+
+
+func _on_gameover_mp_leave() -> void:
+	_dismiss_game_over_ui()
+	NetworkManager.disconnect_all()
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("return_to_title"):
+		main_node.return_to_title()
+
+
+@rpc("authority", "call_local", "reliable")
+func _rpc_mp_restart(new_seed: int) -> void:
+	_dismiss_game_over_ui()
+	NetworkManager.current_dungeon_seed = new_seed
+	NetworkManager.revive_all()
+	GameManager.player_nodes.clear()
+	var main_node = get_tree().current_scene
+	if main_node and main_node.has_method("start_game"):
+		main_node.start_game()

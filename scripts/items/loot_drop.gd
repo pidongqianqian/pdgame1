@@ -50,8 +50,9 @@ func _create_glow_light(rarity: int) -> void:
 	var glow_data = RARITY_GLOW.get(rarity, RARITY_GLOW[0])
 
 	_glow_light = PointLight2D.new()
+	_glow_light.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_glow_light.texture = _make_light_texture()
-	_glow_light.texture_scale = 1.2 + rarity * 0.3
+	_glow_light.texture_scale = 1.8 + rarity * 0.4
 	_glow_light.color = glow_data["color"]
 	_glow_light.energy = glow_data["energy"]
 	_glow_light.blend_mode = PointLight2D.BLEND_MODE_ADD
@@ -72,12 +73,14 @@ func _make_light_texture() -> GradientTexture2D:
 	tex.fill_from = Vector2(0.5, 0.5)
 	tex.fill_to   = Vector2(1.0, 0.5)
 	var g = Gradient.new()
-	g.add_point(0.0, Color(1, 1, 1, 1))
-	g.add_point(0.5, Color(1, 1, 1, 0.4))
+	g.add_point(0.0, Color(1, 1, 1, 0.8))
+	g.add_point(0.25, Color(1, 1, 1, 0.35))
+	g.add_point(0.5, Color(1, 1, 1, 0.08))
+	g.add_point(0.65, Color(1, 1, 1, 0))
 	g.add_point(1.0, Color(1, 1, 1, 0))
 	tex.gradient = g
-	tex.width = 32
-	tex.height = 32
+	tex.width = 64
+	tex.height = 64
 	return tex
 
 
@@ -119,6 +122,13 @@ func _start_bob_animation() -> void:
 func _on_body_entered(body: Node2D) -> void:
 	if body is Player:
 		var player_node = body as Player
+		# 技能卷轴直接使用，不占背包
+		if item_data.get("type", "") == "skill_scroll":
+			var pid: String = item_data.get("passive_id", "")
+			if pid != "":
+				player_node.stats.learn_passive(pid)
+			_pickup_effect()
+			return
 		if player_node.stats.add_to_inventory(item_data):
 			_pickup_effect()
 		else:

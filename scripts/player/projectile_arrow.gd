@@ -6,7 +6,7 @@ var max_penetrate: int = 2
 var owner_ref: Node2D = null
 
 var _hit_count: int = 0
-var _lifetime: float = 1.4
+var _lifetime: float = 0.7
 
 
 func _ready() -> void:
@@ -23,28 +23,20 @@ func setup(dir: Vector2, dmg: int, speed: float, penetrate: int, owner_node: Nod
 	max_penetrate = penetrate
 	owner_ref = owner_node
 
-	# 箭矢视觉
-	var shaft = ColorRect.new()
-	shaft.size = Vector2(12, 2)
-	shaft.position = Vector2(-6, -1)
-	shaft.color = Color(0.5, 1.0, 0.55)
-	shaft.rotation = dir.angle()
-	add_child(shaft)
-
-	var tip = ColorRect.new()
-	tip.size = Vector2(4, 3)
-	tip.position = Vector2(5, -1.5)
-	tip.color = Color(0.85, 1.0, 0.65)
-	tip.rotation = dir.angle()
-	add_child(tip)
-
-	# 尾迹光点
-	var trail = ColorRect.new()
-	trail.size = Vector2(3, 1)
-	trail.position = Vector2(-8, -0.5)
-	trail.color = Color(0.4, 0.9, 0.45, 0.5)
-	trail.rotation = dir.angle()
-	add_child(trail)
+	# 箭矢精灵
+	var arrow_sprite = Sprite2D.new()
+	var bow_tex = load("res://assets/sprites/items/bow.png")
+	if bow_tex:
+		arrow_sprite.texture = bow_tex
+		arrow_sprite.scale = Vector2(0.6, 0.6)
+	else:
+		var shaft = ColorRect.new()
+		shaft.size = Vector2(10, 2)
+		shaft.position = Vector2(-5, -1)
+		shaft.color = Color(0.5, 1.0, 0.55)
+		add_child(shaft)
+	arrow_sprite.modulate = Color(0.7, 1.0, 0.7)
+	add_child(arrow_sprite)
 
 	rotation = dir.angle()
 

@@ -8,7 +8,7 @@ var owner_ref: Node2D = null  # 发射者（用于生成命中特效）
 
 var _hit_count: int = 0
 var _target: Node2D = null
-var _lifetime: float = 1.8
+var _lifetime: float = 0.9
 var _gfx: Node2D
 
 
@@ -19,29 +19,24 @@ func _ready() -> void:
 	_gfx = Node2D.new()
 	add_child(_gfx)
 
-	# 紫色光球（多层同心矩形模拟圆）
-	for r in [6, 4, 2]:
-		var ring = ColorRect.new()
-		ring.size = Vector2(r * 2, r * 2)
-		ring.position = Vector2(-r, -r)
-		if r == 6:
-			ring.color = Color(0.55, 0.25, 1.0, 0.55)
-		elif r == 4:
-			ring.color = Color(0.75, 0.40, 1.0, 0.80)
-		else:
-			ring.color = Color(1.0,  0.80, 1.0, 1.00)
-		_gfx.add_child(ring)
-
-	# 外发光晕
-	var glow = ColorRect.new()
-	glow.size = Vector2(14, 14)
-	glow.position = Vector2(-7, -7)
-	glow.color = Color(0.6, 0.3, 1.0, 0.25)
-	add_child(glow)
+	# 魔法弹精灵
+	var orb_sprite = Sprite2D.new()
+	var staff_tex = load("res://assets/sprites/items/staff.png")
+	if staff_tex:
+		orb_sprite.texture = staff_tex
+		orb_sprite.scale = Vector2(0.7, 0.7)
+	else:
+		var fallback = ColorRect.new()
+		fallback.size = Vector2(6, 6)
+		fallback.position = Vector2(-3, -3)
+		fallback.color = Color(0.75, 0.40, 1.0, 0.9)
+		_gfx.add_child(fallback)
+	orb_sprite.modulate = Color(0.85, 0.55, 1.0)
+	_gfx.add_child(orb_sprite)
 
 	# 旋转动画
 	var spin = create_tween().set_loops()
-	spin.tween_property(_gfx, "rotation", TAU, 0.5)
+	spin.tween_property(_gfx, "rotation", TAU, 0.4)
 
 	# 定时销毁
 	var timer = get_tree().create_timer(_lifetime)
@@ -64,7 +59,7 @@ func _find_nearest_target() -> void:
 	for e in enemies:
 		if not is_instance_valid(e): continue
 		var d = global_position.distance_to(e.global_position)
-		if d < nearest_dist and d < 140:
+		if d < nearest_dist and d < 80:
 			nearest_dist = d
 			_target = e
 
