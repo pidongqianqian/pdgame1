@@ -22,6 +22,8 @@ const THEME_CONFIG = {
 			preload("res://scenes/enemies/boss_dark_knight.tscn"),
 		],
 		"ambience": Color(0.12, 0.08, 0.18),
+		"tile_modulate": Color(0.75, 0.72, 0.85),
+		"banner_color": Color(0.35, 0.25, 0.55),
 	},
 	DungeonTheme.FOREST: {
 		"name": "地下森林",
@@ -36,7 +38,9 @@ const THEME_CONFIG = {
 		"big_bosses": [
 			preload("res://scenes/enemies/boss_necromancer.tscn"),
 		],
-		"ambience": Color(0.06, 0.14, 0.08),
+		"ambience": Color(0.04, 0.16, 0.06),
+		"tile_modulate": Color(0.6, 0.88, 0.55),
+		"banner_color": Color(0.2, 0.5, 0.15),
 	},
 	DungeonTheme.INFERNO: {
 		"name": "熔岩炼狱",
@@ -52,7 +56,9 @@ const THEME_CONFIG = {
 		"big_bosses": [
 			preload("res://scenes/enemies/boss_fire_elemental.tscn"),
 		],
-		"ambience": Color(0.18, 0.06, 0.04),
+		"ambience": Color(0.22, 0.06, 0.02),
+		"tile_modulate": Color(0.92, 0.6, 0.45),
+		"banner_color": Color(0.65, 0.2, 0.05),
 	},
 	DungeonTheme.NECROPOLIS: {
 		"name": "亡灵殿堂",
@@ -69,6 +75,8 @@ const THEME_CONFIG = {
 			preload("res://scenes/enemies/boss_dark_knight.tscn"),
 		],
 		"ambience": Color(0.10, 0.06, 0.16),
+		"tile_modulate": Color(0.65, 0.55, 0.8),
+		"banner_color": Color(0.4, 0.15, 0.55),
 	},
 }
 
@@ -86,12 +94,18 @@ var _skill_pts_btn: Button = null
 
 var _disconnect_ui: CanvasLayer = null
 
+# Debug
+var _debug_panel: CanvasLayer = null
+var _debug_info_label: Label = null
+const DEBUG_ENABLED: bool = true
+
 
 func _ready() -> void:
 	GameManager.player_died.connect(_on_game_over)
 	if NetworkManager.is_multiplayer_active():
 		NetworkManager.host_disconnected.connect(_on_host_disconnected)
 		NetworkManager.player_disconnected.connect(_on_peer_disconnected)
+	entities = $Entities
 	_setup_dungeon()
 	_setup_canvas_modulate()
 	_spawn_player()
@@ -106,6 +120,9 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("inventory"):
 		if inventory_ui and not inventory_ui.visible:
 			inventory_ui.open()
+
+	if DEBUG_ENABLED and event is InputEventKey and event.pressed and not event.echo:
+		_handle_debug_input(event as InputEventKey)
 
 
 func _setup_dungeon() -> void:
@@ -122,6 +139,8 @@ func _setup_dungeon() -> void:
 	var seed_val: int = NetworkManager.current_dungeon_seed
 	dungeon.generate(GameManager.current_floor, player_count, seed_val)
 	dungeon.all_rooms_cleared.connect(_on_all_rooms_cleared)
+	_apply_theme_tilemap_tint()
+	_spawn_room_decorations()
 
 
 func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
@@ -342,9 +361,10 @@ func _setup_ambience() -> void:
 
 
 func _apply_theme_ambience() -> void:
-	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
+	var theme: DungeonTheme = _get_current_theme()
+	var config: Dictionary = THEME_CONFIG[theme]
 	if ambience and ambience.has_method("set_theme"):
-		ambience.set_theme(config["ambience"])
+		ambience.set_theme(config["ambience"], theme as int)
 
 
 func _on_enemy_died_in_room(room_index: int, enemy_pos: Vector2, is_boss: bool, gold: int, xp: int = 12, killer_peer: int = 0) -> void:
@@ -784,6 +804,8 @@ func _next_floor() -> void:
 	var player_count: int = NetworkManager.get_player_count()
 	var seed_val: int = NetworkManager.current_dungeon_seed
 	dungeon.generate(GameManager.current_floor, player_count, seed_val)
+	_apply_theme_tilemap_tint()
+	_spawn_room_decorations()
 
 	# 单人直接恢复，多人在 _spawn_player 里统一复活
 	if not NetworkManager.is_multiplayer_active():
@@ -1246,8 +1268,9 @@ func _show_theme_banner() -> void:
 	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	panel.offset_top = 30
 	var sb = StyleBoxFlat.new()
-	sb.bg_color = Color(config["ambience"].r * 0.6, config["ambience"].g * 0.6, config["ambience"].b * 0.6, 0.92)
-	sb.border_color = Color(1.0, 0.85, 0.5, 0.7)
+	var bc: Color = config.get("banner_color", config["ambience"])
+	sb.bg_color = Color(bc.r, bc.g, bc.b, 0.92)
+	sb.border_color = Color(bc.r * 1.5 + 0.3, bc.g * 1.5 + 0.3, bc.b * 1.5 + 0.3, 0.7)
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(4)
 	sb.set_content_margin_all(12)
@@ -1281,3 +1304,361 @@ func _show_theme_banner() -> void:
 	tw.tween_interval(2.5)
 	tw.tween_property(panel, "modulate:a", 0.0, 0.6)
 	tw.tween_callback(layer.queue_free)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Theme Visual System
+# ═══════════════════════════════════════════════════════════════
+
+func _apply_theme_tilemap_tint() -> void:
+	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
+	var tint: Color = config.get("tile_modulate", Color.WHITE)
+	if dungeon and dungeon.tilemap:
+		dungeon.tilemap.modulate = tint
+
+
+const DECO_DENSITY: int = 5
+
+func _spawn_room_decorations() -> void:
+	var theme: DungeonTheme = _get_current_theme()
+	for i in dungeon.rooms.size():
+		var room: Rect2i = dungeon.rooms[i]
+		var count: int = clampi(int(room.get_area() / 18), 1, DECO_DENSITY)
+		for j in count:
+			var margin: int = 1
+			var tx: int = randi_range(room.position.x + margin, room.end.x - 1 - margin)
+			var ty: int = randi_range(room.position.y + margin, room.end.y - 1 - margin)
+			if not dungeon.is_floor_at(Vector2(tx * 16 + 8, ty * 16 + 8)):
+				continue
+			var world_pos = Vector2(tx * 16 + randf_range(2, 14), ty * 16 + randf_range(2, 14))
+			_place_decoration(world_pos, theme)
+
+
+func _place_decoration(pos: Vector2, theme: DungeonTheme) -> void:
+	match theme:
+		DungeonTheme.CRYPT:
+			_deco_crypt(pos)
+		DungeonTheme.FOREST:
+			_deco_forest(pos)
+		DungeonTheme.INFERNO:
+			_deco_inferno(pos)
+		DungeonTheme.NECROPOLIS:
+			_deco_necropolis(pos)
+
+
+func _deco_crypt(pos: Vector2) -> void:
+	var kind: int = randi() % 3
+	match kind:
+		0:  # 小骨头
+			var bone = _make_deco_sprite(pos, Vector2(5, 2), Color(0.85, 0.82, 0.7, 0.6))
+			bone.rotation = randf_range(-0.5, 0.5)
+		1:  # 蛛网角
+			var web = _make_deco_sprite(pos, Vector2(4, 4), Color(0.8, 0.8, 0.8, 0.25))
+			web.rotation = randf_range(0, TAU)
+		2:  # 碎石
+			var s1 = _make_deco_sprite(pos, Vector2(2, 2), Color(0.45, 0.4, 0.38, 0.5))
+			_make_deco_sprite(pos + Vector2(3, 1), Vector2(1, 1), Color(0.5, 0.45, 0.4, 0.4))
+
+
+func _deco_forest(pos: Vector2) -> void:
+	var kind: int = randi() % 4
+	match kind:
+		0:  # 草丛
+			_make_grass_tuft(pos)
+		1:  # 小蘑菇
+			_make_mushroom_deco(pos)
+		2:  # 藤蔓/苔藓
+			var moss = _make_deco_sprite(pos, Vector2(3, 2), Color(0.2, 0.55, 0.15, 0.5))
+			moss.rotation = randf_range(-0.3, 0.3)
+		3:  # 落叶
+			var leaf = _make_deco_sprite(pos, Vector2(3, 2), Color(0.5, 0.65, 0.2, 0.45))
+			leaf.rotation = randf_range(0, TAU)
+
+
+func _deco_inferno(pos: Vector2) -> void:
+	var kind: int = randi() % 3
+	match kind:
+		0:  # 裂缝/熔岩痕
+			var crack = _make_deco_sprite(pos, Vector2(6, 1), Color(0.9, 0.35, 0.1, 0.55))
+			crack.rotation = randf_range(-0.4, 0.4)
+		1:  # 灰烬
+			for k in 3:
+				var offset = Vector2(randf_range(-3, 3), randf_range(-3, 3))
+				_make_deco_sprite(pos + offset, Vector2(1, 1), Color(0.3, 0.25, 0.2, 0.4))
+		2:  # 小熔岩池
+			_make_lava_pool(pos)
+
+
+func _deco_necropolis(pos: Vector2) -> void:
+	var kind: int = randi() % 3
+	match kind:
+		0:  # 符文痕迹
+			_make_rune_mark(pos)
+		1:  # 暗紫烛光
+			var candle = _make_deco_sprite(pos, Vector2(1, 3), Color(0.7, 0.55, 0.75, 0.55))
+			var glow = _make_deco_sprite(pos + Vector2(0, -2), Vector2(3, 3),
+				Color(0.6, 0.3, 0.8, 0.15))
+		2:  # 裂骨
+			var bone = _make_deco_sprite(pos, Vector2(4, 2), Color(0.6, 0.55, 0.65, 0.45))
+			bone.rotation = randf_range(-0.6, 0.6)
+
+
+func _make_deco_sprite(pos: Vector2, size: Vector2, color: Color) -> ColorRect:
+	var rect = ColorRect.new()
+	rect.size = size
+	rect.color = color
+	rect.position = pos - size * 0.5
+	rect.z_index = -1
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	entities.add_child(rect)
+	return rect
+
+
+func _make_grass_tuft(pos: Vector2) -> void:
+	var base_green: float = randf_range(0.35, 0.6)
+	for k in randi_range(2, 4):
+		var offset = Vector2(randf_range(-3, 3), randf_range(-2, 1))
+		var blade = ColorRect.new()
+		blade.size = Vector2(1, randi_range(3, 5))
+		blade.color = Color(0.15 + randf_range(-0.05, 0.05),
+			base_green + randf_range(-0.1, 0.1), 0.1, 0.6)
+		blade.position = pos + offset
+		blade.rotation = randf_range(-0.3, 0.3)
+		blade.z_index = -1
+		entities.add_child(blade)
+
+
+func _make_mushroom_deco(pos: Vector2) -> void:
+	# 菌柄
+	var stem = ColorRect.new()
+	stem.size = Vector2(2, 3)
+	stem.color = Color(0.85, 0.8, 0.65, 0.7)
+	stem.position = pos + Vector2(-1, 0)
+	stem.z_index = -1
+	entities.add_child(stem)
+	# 菌盖
+	var cap = ColorRect.new()
+	var cap_colors = [Color(0.8, 0.2, 0.15, 0.7), Color(0.6, 0.4, 0.1, 0.7),
+		Color(0.3, 0.5, 0.8, 0.7)]
+	cap.size = Vector2(4, 2)
+	cap.color = cap_colors[randi() % cap_colors.size()]
+	cap.position = pos + Vector2(-2, -2)
+	cap.z_index = -1
+	entities.add_child(cap)
+
+
+func _make_lava_pool(pos: Vector2) -> void:
+	var pool = ColorRect.new()
+	pool.size = Vector2(randi_range(4, 7), randi_range(3, 5))
+	pool.color = Color(0.95, 0.4, 0.1, 0.4)
+	pool.position = pos - pool.size * 0.5
+	pool.z_index = -1
+	entities.add_child(pool)
+	var core = ColorRect.new()
+	core.size = pool.size * 0.5
+	core.color = Color(1.0, 0.75, 0.2, 0.5)
+	core.position = pos - core.size * 0.5
+	core.z_index = -1
+	entities.add_child(core)
+
+
+func _make_rune_mark(pos: Vector2) -> void:
+	var color = Color(0.5, 0.25, 0.7, 0.3)
+	# 十字符文
+	_make_deco_sprite(pos, Vector2(5, 1), color)
+	_make_deco_sprite(pos, Vector2(1, 5), color)
+	# 角上小点
+	for corner in [Vector2(-2, -2), Vector2(2, -2), Vector2(-2, 2), Vector2(2, 2)]:
+		_make_deco_sprite(pos + corner, Vector2(1, 1), Color(color.r, color.g, color.b, 0.2))
+
+
+# ═══════════════════════════════════════════════════════════════
+# Debug System (F5 面板, F1-F4 跳主题, PageUp/Down 跳层)
+# ═══════════════════════════════════════════════════════════════
+
+func _handle_debug_input(event: InputEventKey) -> void:
+	match event.keycode:
+		KEY_F5:
+			_toggle_debug_panel()
+		KEY_F1:
+			_debug_jump_to_floor(1)
+		KEY_F2:
+			_debug_jump_to_floor(4)
+		KEY_F3:
+			_debug_jump_to_floor(7)
+		KEY_F4:
+			_debug_jump_to_floor(10)
+		KEY_F6:
+			_debug_jump_to_floor(GameManager.current_floor + 1)
+		KEY_F7:
+			_debug_jump_to_floor(maxi(GameManager.current_floor - 1, 1))
+		KEY_F9:
+			# 满血 + 加金币
+			if player and is_instance_valid(player):
+				player.stats.heal(player.stats.max_hp)
+				GameManager.gold += 200
+				_debug_toast("回满血 & +200金币")
+		KEY_F10:
+			# 获得 3 点技能点
+			if player and is_instance_valid(player):
+				player.stats.skill_points += 3
+				_debug_toast("+3 技能点")
+		KEY_F11:
+			# 直接清除当前层所有敌人
+			_debug_kill_all_enemies()
+
+
+func _debug_jump_to_floor(target_floor: int) -> void:
+	if _floor_clear_ui and is_instance_valid(_floor_clear_ui):
+		_floor_clear_ui.queue_free()
+		_floor_clear_ui = null
+
+	GameManager.current_floor = target_floor
+	_last_theme_block = -1
+
+	if ambience and ambience.has_method("clear_torches"):
+		ambience.clear_torches()
+
+	for child in entities.get_children():
+		var keep: bool = false
+		if NetworkManager.is_multiplayer_active():
+			keep = GameManager.player_nodes.values().has(child)
+		else:
+			keep = (child == player)
+		if not keep:
+			child.queue_free()
+
+	var player_count: int = NetworkManager.get_player_count()
+	var seed_val: int = randi()
+	dungeon.generate(GameManager.current_floor, player_count, seed_val)
+	_apply_theme_tilemap_tint()
+	_spawn_room_decorations()
+
+	_spawn_player()
+	_spawn_enemies()
+	_spawn_torch_lights()
+	_apply_theme_ambience()
+	_show_theme_banner()
+
+	if player and is_instance_valid(player):
+		player.stats.heal(player.stats.max_hp)
+
+	_update_debug_info()
+	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
+	_debug_toast("跳转到第 %d 层 —「%s」" % [target_floor, config["name"]])
+
+
+func _debug_kill_all_enemies() -> void:
+	var killed: int = 0
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(enemy) and enemy is EnemyBase:
+			if (enemy as EnemyBase).ai_state != EnemyBase.AIState.DEAD:
+				(enemy as EnemyBase).take_damage(99999, Vector2.ZERO)
+				killed += 1
+	_debug_toast("击杀 %d 只敌人" % killed)
+
+
+func _toggle_debug_panel() -> void:
+	if _debug_panel and is_instance_valid(_debug_panel):
+		_debug_panel.queue_free()
+		_debug_panel = null
+		return
+
+	_debug_panel = CanvasLayer.new()
+	_debug_panel.layer = 50
+	add_child(_debug_panel)
+
+	var panel = PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	panel.offset_left = 8
+	panel.offset_top = 8
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.0, 0.0, 0.0, 0.75)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(8)
+	panel.add_theme_stylebox_override("panel", sb)
+	_debug_panel.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	panel.add_child(vbox)
+
+	var title = Label.new()
+	title.text = "[ DEBUG 调试面板 ]"
+	title.add_theme_font_size_override("font_size", 10)
+	title.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+	vbox.add_child(title)
+
+	_debug_info_label = Label.new()
+	_debug_info_label.add_theme_font_size_override("font_size", 9)
+	_debug_info_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
+	vbox.add_child(_debug_info_label)
+
+	var sep = HSeparator.new()
+	vbox.add_child(sep)
+
+	var hotkey_label = Label.new()
+	hotkey_label.text = (
+		"F1  石窟(1层)  F2  森林(4层)\n"
+		+ "F3  炼狱(7层)  F4  亡灵(10层)\n"
+		+ "F6  下一层  F7  上一层\n"
+		+ "F9  满血+200金  F10  +3技能点\n"
+		+ "F11  击杀全部敌人  F5  关闭面板"
+	)
+	hotkey_label.add_theme_font_size_override("font_size", 8)
+	hotkey_label.add_theme_color_override("font_color", Color(0.65, 0.75, 0.65))
+	vbox.add_child(hotkey_label)
+
+	var btn_row = HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 4)
+	vbox.add_child(btn_row)
+	for data in [["石窟", 1], ["森林", 4], ["炼狱", 7], ["亡灵", 10]]:
+		var btn = Button.new()
+		btn.text = data[0]
+		btn.add_theme_font_size_override("font_size", 9)
+		var floor_num: int = data[1]
+		btn.pressed.connect(func(): _debug_jump_to_floor(floor_num))
+		btn_row.add_child(btn)
+
+	_update_debug_info()
+
+
+func _update_debug_info() -> void:
+	if not _debug_info_label or not is_instance_valid(_debug_info_label):
+		return
+	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
+	var theme_names = ["CRYPT", "FOREST", "INFERNO", "NECROPOLIS"]
+	var theme_idx: int = _get_current_theme() as int
+	_debug_info_label.text = (
+		"当前层: %d  主题: %s「%s」\n" % [GameManager.current_floor, theme_names[theme_idx], config["name"]]
+		+ "敌人存活: %d  金币: %d\n" % [enemies_alive, GameManager.gold]
+		+ "玩家等级: %d  技能点: %d" % [
+			player.stats.level if player and is_instance_valid(player) else 0,
+			player.stats.skill_points if player and is_instance_valid(player) else 0,
+		]
+	)
+
+
+func _debug_toast(msg: String) -> void:
+	var layer = CanvasLayer.new()
+	layer.layer = 51
+	add_child(layer)
+
+	var lbl = Label.new()
+	lbl.text = msg
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.4))
+	lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	lbl.add_theme_constant_override("shadow_offset_x", 1)
+	lbl.add_theme_constant_override("shadow_offset_y", 1)
+	lbl.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	lbl.offset_top = 50
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(lbl)
+
+	var tw = create_tween()
+	tw.tween_interval(1.5)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(layer.queue_free)
+
+	_update_debug_info()

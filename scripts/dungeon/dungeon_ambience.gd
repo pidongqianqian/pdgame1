@@ -60,8 +60,10 @@ var _dust_nodes: Array = []
 var _torch_positions: Array = []
 var _torch_sprites: Array = []
 var _floor_overlay: ColorRect
+var _particle_layer: CanvasLayer
 
 var _theme_color: Color = Color(0.12, 0.08, 0.18)
+var _theme_id: int = 0  # 0=crypt, 1=forest, 2=inferno, 3=necropolis
 
 
 func _ready() -> void:
@@ -98,18 +100,11 @@ func _create_floor_overlay() -> void:
 	add_child(_floor_overlay)
 
 
-func set_theme(theme_color: Color) -> void:
+func set_theme(theme_color: Color, theme_id: int = 0) -> void:
 	_theme_color = theme_color
+	_theme_id = theme_id
 	_update_floor_theme()
-
-	for d in _dust_nodes:
-		var node: ColorRect = d["node"]
-		node.color = Color(
-			_theme_color.r * 4 + 0.5,
-			_theme_color.g * 4 + 0.5,
-			_theme_color.b * 4 + 0.5,
-			node.color.a
-		)
+	_rebuild_dust_particles()
 
 
 func _update_floor_theme() -> void:
@@ -126,21 +121,152 @@ func _update_floor_theme() -> void:
 
 
 func _spawn_dust_particles() -> void:
-	var world_layer = CanvasLayer.new()
-	world_layer.layer = 3
-	add_child(world_layer)
+	_particle_layer = CanvasLayer.new()
+	_particle_layer.layer = 3
+	add_child(_particle_layer)
+	_rebuild_dust_particles()
 
+
+func _rebuild_dust_particles() -> void:
+	for d in _dust_nodes:
+		if is_instance_valid(d["node"]):
+			d["node"].queue_free()
+	_dust_nodes.clear()
+
+	if not _particle_layer:
+		return
+
+	match _theme_id:
+		0:
+			_spawn_crypt_dust()
+		1:
+			_spawn_forest_leaves()
+		2:
+			_spawn_inferno_embers()
+		3:
+			_spawn_necro_wisps()
+
+
+func _spawn_crypt_dust() -> void:
 	for i in 14:
 		var dust = ColorRect.new()
 		dust.size = Vector2(1, 1)
 		dust.color = Color(0.7, 0.7, 0.9, randf_range(0.15, 0.35))
 		dust.position = Vector2(randf_range(0, 800), randf_range(0, 400))
 		dust.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		world_layer.add_child(dust)
+		_particle_layer.add_child(dust)
 		_dust_nodes.append({
-			"node": dust,
+			"node": dust, "type": "rise",
 			"speed": randf_range(4.0, 14.0),
 			"drift": randf_range(-8.0, 8.0),
+			"phase": randf_range(0, TAU),
+		})
+
+
+func _spawn_forest_leaves() -> void:
+	var leaf_colors = [
+		Color(0.3, 0.6, 0.15, 0.45),
+		Color(0.5, 0.7, 0.2, 0.4),
+		Color(0.6, 0.55, 0.1, 0.35),
+		Color(0.25, 0.5, 0.1, 0.4),
+	]
+	for i in 18:
+		var leaf = ColorRect.new()
+		leaf.size = Vector2(randi_range(2, 3), 1)
+		leaf.color = leaf_colors[randi() % leaf_colors.size()]
+		leaf.position = Vector2(randf_range(0, 800), randf_range(0, 400))
+		leaf.rotation = randf_range(0, TAU)
+		leaf.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_particle_layer.add_child(leaf)
+		_dust_nodes.append({
+			"node": leaf, "type": "fall",
+			"speed": randf_range(6.0, 18.0),
+			"drift": randf_range(-15.0, 15.0),
+			"phase": randf_range(0, TAU),
+			"spin": randf_range(-1.5, 1.5),
+		})
+	# 少量孢子光点
+	for i in 6:
+		var spore = ColorRect.new()
+		spore.size = Vector2(1, 1)
+		spore.color = Color(0.6, 1.0, 0.4, randf_range(0.2, 0.4))
+		spore.position = Vector2(randf_range(0, 800), randf_range(0, 400))
+		spore.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_particle_layer.add_child(spore)
+		_dust_nodes.append({
+			"node": spore, "type": "float",
+			"speed": randf_range(2.0, 6.0),
+			"drift": randf_range(-6.0, 6.0),
+			"phase": randf_range(0, TAU),
+		})
+
+
+func _spawn_inferno_embers() -> void:
+	var ember_colors = [
+		Color(1.0, 0.6, 0.1, 0.5),
+		Color(1.0, 0.4, 0.05, 0.55),
+		Color(1.0, 0.8, 0.2, 0.4),
+	]
+	for i in 20:
+		var ember = ColorRect.new()
+		ember.size = Vector2(1, 1)
+		ember.color = ember_colors[randi() % ember_colors.size()]
+		ember.position = Vector2(randf_range(0, 800), randf_range(0, 400))
+		ember.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_particle_layer.add_child(ember)
+		_dust_nodes.append({
+			"node": ember, "type": "rise_fast",
+			"speed": randf_range(12.0, 30.0),
+			"drift": randf_range(-12.0, 12.0),
+			"phase": randf_range(0, TAU),
+		})
+	# 热浪摇曳大粒子
+	for i in 4:
+		var heat = ColorRect.new()
+		heat.size = Vector2(3, 2)
+		heat.color = Color(1.0, 0.5, 0.15, 0.12)
+		heat.position = Vector2(randf_range(0, 800), randf_range(200, 400))
+		heat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_particle_layer.add_child(heat)
+		_dust_nodes.append({
+			"node": heat, "type": "rise",
+			"speed": randf_range(3.0, 8.0),
+			"drift": randf_range(-20.0, 20.0),
+			"phase": randf_range(0, TAU),
+		})
+
+
+func _spawn_necro_wisps() -> void:
+	var wisp_colors = [
+		Color(0.6, 0.3, 0.9, 0.3),
+		Color(0.4, 0.5, 1.0, 0.25),
+		Color(0.8, 0.4, 1.0, 0.2),
+	]
+	for i in 10:
+		var wisp = ColorRect.new()
+		wisp.size = Vector2(2, 2)
+		wisp.color = wisp_colors[randi() % wisp_colors.size()]
+		wisp.position = Vector2(randf_range(0, 800), randf_range(0, 400))
+		wisp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_particle_layer.add_child(wisp)
+		_dust_nodes.append({
+			"node": wisp, "type": "float",
+			"speed": randf_range(1.5, 5.0),
+			"drift": randf_range(-10.0, 10.0),
+			"phase": randf_range(0, TAU),
+		})
+	# 暗尘
+	for i in 8:
+		var dust = ColorRect.new()
+		dust.size = Vector2(1, 1)
+		dust.color = Color(0.5, 0.4, 0.6, randf_range(0.15, 0.3))
+		dust.position = Vector2(randf_range(0, 800), randf_range(0, 400))
+		dust.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_particle_layer.add_child(dust)
+		_dust_nodes.append({
+			"node": dust, "type": "rise",
+			"speed": randf_range(3.0, 10.0),
+			"drift": randf_range(-6.0, 6.0),
 			"phase": randf_range(0, TAU),
 		})
 
@@ -154,12 +280,51 @@ func _animate_dust(delta: float) -> void:
 	var t: float = Time.get_ticks_msec() / 1000.0
 	for d in _dust_nodes:
 		var node: ColorRect = d["node"]
-		node.position.y -= d["speed"] * delta
-		node.position.x += sin(t * 0.8 + d["phase"]) * d["drift"] * delta
-		node.color.a = (sin(t * 1.2 + d["phase"]) * 0.1 + 0.22)
-		if node.position.y < -4:
-			node.position.y = 364.0
-			node.position.x = randf_range(0, 800)
+		if not is_instance_valid(node):
+			continue
+		var ptype: String = d.get("type", "rise")
+		var base_alpha: float = node.color.a
+
+		match ptype:
+			"rise":
+				node.position.y -= d["speed"] * delta
+				node.position.x += sin(t * 0.8 + d["phase"]) * d["drift"] * delta
+				node.color.a = clampf(sin(t * 1.2 + d["phase"]) * 0.1 + 0.22, 0.05, 0.5)
+				if node.position.y < -4:
+					node.position.y = 400.0
+					node.position.x = randf_range(0, 800)
+
+			"rise_fast":
+				node.position.y -= d["speed"] * delta
+				node.position.x += sin(t * 2.0 + d["phase"]) * d["drift"] * delta
+				var flicker: float = sin(t * 8.0 + d["phase"]) * 0.2
+				node.color.a = clampf(0.35 + flicker, 0.1, 0.6)
+				if node.position.y < -4:
+					node.position.y = randf_range(350, 420)
+					node.position.x = randf_range(0, 800)
+
+			"fall":
+				node.position.y += d["speed"] * delta
+				node.position.x += sin(t * 0.6 + d["phase"]) * d["drift"] * delta
+				if d.has("spin"):
+					node.rotation += d["spin"] * delta
+				node.color.a = clampf(sin(t * 0.8 + d["phase"]) * 0.1 + 0.35, 0.1, 0.5)
+				if node.position.y > 410:
+					node.position.y = randf_range(-20, -5)
+					node.position.x = randf_range(0, 800)
+
+			"float":
+				node.position.y += sin(t * 0.5 + d["phase"]) * d["speed"] * delta
+				node.position.x += cos(t * 0.3 + d["phase"]) * d["drift"] * delta
+				node.color.a = clampf(sin(t * 0.7 + d["phase"]) * 0.15 + 0.25, 0.05, 0.45)
+				if node.position.x < -10:
+					node.position.x = 810.0
+				elif node.position.x > 810:
+					node.position.x = -10.0
+				if node.position.y < -10:
+					node.position.y = 410.0
+				elif node.position.y > 410:
+					node.position.y = -10.0
 
 
 func _update_torch_shader() -> void:
