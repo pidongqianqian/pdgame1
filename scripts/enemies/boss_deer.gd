@@ -35,6 +35,11 @@ func _physics_process(delta: float) -> void:
 		_remote_enemy_process(delta)
 		return
 
+	_oob_check_timer -= delta
+	if _oob_check_timer <= 0.0:
+		_oob_check_timer = OOB_CHECK_INTERVAL
+		_check_out_of_bounds()
+
 	if _is_charging:
 		_process_charge(delta)
 		move_and_slide()

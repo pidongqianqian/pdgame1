@@ -44,6 +44,8 @@ var _is_frozen: bool = false
 var _sync_timer: float = 0.0
 const ENEMY_SYNC_INTERVAL: float = 1.0 / 15.0
 var _remote_target_pos: Vector2 = Vector2.ZERO
+var _oob_check_timer: float = 0.0
+const OOB_CHECK_INTERVAL: float = 0.5
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hitbox: Area2D = $Hitbox
@@ -65,6 +67,12 @@ func _physics_process(delta: float) -> void:
 	if NetworkManager.is_multiplayer_active() and not multiplayer.is_server():
 		_remote_enemy_process(delta)
 		return
+
+	_oob_check_timer -= delta
+	if _oob_check_timer <= 0.0:
+		_oob_check_timer = OOB_CHECK_INTERVAL
+		_check_out_of_bounds()
+
 	_update_debuffs(delta)
 	if _is_frozen:
 		velocity = Vector2.ZERO
@@ -108,6 +116,20 @@ func _broadcast_sync(delta: float) -> void:
 	if _sync_timer >= ENEMY_SYNC_INTERVAL:
 		_sync_timer = 0.0
 		_rpc_sync_pos.rpc(global_position, int(ai_state))
+
+
+func _check_out_of_bounds() -> void:
+	var dungeon = get_tree().current_scene.get_node_or_null("DungeonGenerator")
+	if not dungeon or not dungeon.has_method("is_floor_at"):
+		return
+	if not dungeon.is_floor_at(global_position):
+		var safe_pos: Vector2
+		if room_index >= 0 and dungeon.has_method("get_room_center"):
+			safe_pos = dungeon.get_room_center(room_index)
+		else:
+			safe_pos = Vector2(160, 160)
+		global_position = safe_pos
+		velocity = Vector2.ZERO
 
 
 func _get_separation_force() -> Vector2:

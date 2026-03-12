@@ -31,6 +31,11 @@ func _physics_process(delta: float) -> void:
 
 	_animate_float(delta)
 
+	_oob_check_timer -= delta
+	if _oob_check_timer <= 0.0:
+		_oob_check_timer = OOB_CHECK_INTERVAL
+		_check_out_of_bounds()
+
 	if ai_state == AIState.CHASE and target and is_instance_valid(target):
 		var dist = _get_distance_to_target()
 		if dist < RETREAT_RANGE:

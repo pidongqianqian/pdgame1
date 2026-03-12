@@ -19,11 +19,190 @@ var _page_label: Label
 var _prev_btn: Button
 var _next_btn: Button
 
+# 浮层 Tooltip（方案 B）
+var _tooltip: PanelContainer = null
+var _tooltip_layer: CanvasLayer = null
+
 
 func _ready() -> void:
 	visible = false
 	_build_ui()
+	_build_tooltip_layer()
 
+
+# ── Tooltip 浮层（独立 CanvasLayer，不影响背包布局）──────────────
+
+func _build_tooltip_layer() -> void:
+	_tooltip_layer = CanvasLayer.new()
+	_tooltip_layer.layer = 30
+	_tooltip_layer.name = "TooltipLayer"
+	add_child(_tooltip_layer)
+
+
+func _show_tooltip(item: Dictionary, is_inv: bool) -> void:
+	_hide_tooltip()
+
+	var slot_id: int = item.get("slot", 0)
+	var equipped: Dictionary = {}
+	if _player and _player.stats.equipment.has(slot_id):
+		equipped = _player.stats.equipment[slot_id]
+
+	var has_compare: bool = is_inv and not equipped.is_empty() and equipped.get("uid", "") != item.get("uid", "")
+
+	_tooltip = PanelContainer.new()
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.04, 0.10, 0.96)
+	sb.border_color = item.get("color", Color.WHITE)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(8)
+	_tooltip.add_theme_stylebox_override("panel", sb)
+	_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 3)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tooltip.add_child(vbox)
+
+	# 标题行
+	var title_lbl = Label.new()
+	title_lbl.text = "[%s] %s" % [item.get("rarity_name", ""), item.get("name", "???")]
+	title_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_SMALL)
+	title_lbl.add_theme_color_override("font_color", item.get("color", Color.WHITE))
+	title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(title_lbl)
+
+	# 分隔线
+	var sep = ColorRect.new()
+	sep.color = Color(1, 1, 1, 0.12)
+	sep.custom_minimum_size = Vector2(0, 1)
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(sep)
+
+	if has_compare:
+		# 两列对比布局
+		var grid = GridContainer.new()
+		grid.columns = 3
+		grid.add_theme_constant_override("h_separation", 8)
+		grid.add_theme_constant_override("v_separation", 2)
+		grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		vbox.add_child(grid)
+
+		_add_compare_header(grid)
+		_add_compare_row(grid, "攻击", item.get("attack", 0), equipped.get("attack", 0))
+		_add_compare_row(grid, "防御", item.get("defense", 0), equipped.get("defense", 0))
+		_add_compare_row(grid, "生命", item.get("hp", 0), equipped.get("hp", 0))
+		_add_compare_row(grid, "速度", item.get("speed", 0), equipped.get("speed", 0))
+
+		var vs_lbl = Label.new()
+		vs_lbl.text = "对比: %s [%s]" % [equipped.get("name", "???"), equipped.get("rarity_name", "")]
+		vs_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_TINY)
+		vs_lbl.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+		vs_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		vbox.add_child(vs_lbl)
+	else:
+		var stats_lbl = Label.new()
+		var parts: Array[String] = []
+		if item.get("attack", 0) != 0:  parts.append("攻击 %+d" % item["attack"])
+		if item.get("defense", 0) != 0: parts.append("防御 %+d" % item["defense"])
+		if item.get("hp", 0) != 0:      parts.append("生命 %+d" % item["hp"])
+		if item.get("speed", 0) != 0:   parts.append("速度 %+d" % item["speed"])
+		stats_lbl.text = "  ".join(parts) if not parts.is_empty() else "无属性加成"
+		stats_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_SMALL)
+		stats_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
+		stats_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		vbox.add_child(stats_lbl)
+
+	var price_lbl = Label.new()
+	price_lbl.text = "售价 %d 金" % item.get("sell_price", 0)
+	price_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_TINY)
+	price_lbl.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+	price_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(price_lbl)
+
+	_tooltip_layer.add_child(_tooltip)
+
+	# 定位到鼠标右上方，下一帧计算尺寸后再调整
+	_tooltip.set_deferred("position", _calc_tooltip_pos())
+
+
+func _add_compare_header(grid: GridContainer) -> void:
+	for text in ["属性", "当前", "→ 新"]:
+		var lbl = Label.new()
+		lbl.text = text
+		lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_TINY)
+		lbl.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		grid.add_child(lbl)
+
+
+func _add_compare_row(grid: GridContainer, stat_name: String, new_val: int, old_val: int) -> void:
+	var diff: int = new_val - old_val
+	var diff_color: Color
+	if diff > 0:
+		diff_color = Color(0.4, 0.9, 0.4)
+	elif diff < 0:
+		diff_color = Color(0.9, 0.4, 0.4)
+	else:
+		diff_color = UITheme.COLORS["text_dim"]
+
+	# 属性名
+	var name_lbl = Label.new()
+	name_lbl.text = stat_name
+	name_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_TINY)
+	name_lbl.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_child(name_lbl)
+
+	# 当前值
+	var old_lbl = Label.new()
+	old_lbl.text = str(old_val)
+	old_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_TINY)
+	old_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	old_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_child(old_lbl)
+
+	# 新值 + 差异
+	var new_text: String
+	if diff > 0:
+		new_text = "%d (↑%d)" % [new_val, diff]
+	elif diff < 0:
+		new_text = "%d (↓%d)" % [new_val, -diff]
+	else:
+		new_text = "%d (=)" % new_val
+	var new_lbl = Label.new()
+	new_lbl.text = new_text
+	new_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_TINY)
+	new_lbl.add_theme_color_override("font_color", diff_color)
+	new_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_child(new_lbl)
+
+
+func _calc_tooltip_pos() -> Vector2:
+	var vp_size = get_viewport().get_visible_rect().size
+	var mouse_pos = get_viewport().get_mouse_position()
+	var tip_size = _tooltip.size if _tooltip.size != Vector2.ZERO else Vector2(200, 120)
+	var x = mouse_pos.x + 14
+	var y = mouse_pos.y - tip_size.y - 8
+	if x + tip_size.x > vp_size.x - 4:
+		x = mouse_pos.x - tip_size.x - 14
+	if y < 4:
+		y = mouse_pos.y + 18
+	return Vector2(x, y)
+
+
+func _process(_delta: float) -> void:
+	if _tooltip and is_instance_valid(_tooltip):
+		_tooltip.position = _calc_tooltip_pos()
+
+
+func _hide_tooltip() -> void:
+	if _tooltip and is_instance_valid(_tooltip):
+		_tooltip.queue_free()
+		_tooltip = null
+
+
+# ── 主 UI 构建 ────────────────────────────────────────────────────
 
 func _build_ui() -> void:
 	_root = PanelContainer.new()
@@ -39,6 +218,7 @@ func _build_ui() -> void:
 	main_vbox.add_theme_constant_override("separation", 4)
 	_root.add_child(main_vbox)
 
+	# 标题栏
 	var title_bar = HBoxContainer.new()
 	main_vbox.add_child(title_bar)
 
@@ -55,12 +235,13 @@ func _build_ui() -> void:
 	close_btn.pressed.connect(_on_close)
 	title_bar.add_child(close_btn)
 
+	# 上半区（装备 + 背包）— 占用所有剩余高度
 	var top_row = HBoxContainer.new()
 	top_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	top_row.add_theme_constant_override("separation", 8)
 	main_vbox.add_child(top_row)
 
-	# Left column: Equipment
+	# 左列：已装备（固定拉伸比）
 	var equip_panel = PanelContainer.new()
 	equip_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	equip_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -84,7 +265,7 @@ func _build_ui() -> void:
 	_equip_list.add_theme_constant_override("separation", 2)
 	equip_inner.add_child(_equip_list)
 
-	# Right column: Inventory
+	# 右列：背包（固定拉伸比）
 	var inv_panel = PanelContainer.new()
 	inv_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inv_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -129,6 +310,7 @@ func _build_ui() -> void:
 	_next_btn.pressed.connect(func(): _change_page(1))
 	inv_header_row.add_child(_next_btn)
 
+	# 批量出售按钮行
 	var sell_row = HBoxContainer.new()
 	sell_row.add_theme_constant_override("separation", 3)
 	inv_inner.add_child(sell_row)
@@ -162,9 +344,12 @@ func _build_ui() -> void:
 	_item_list.add_theme_constant_override("separation", 2)
 	inv_inner.add_child(_item_list)
 
-	# Bottom: Detail + Actions
+	# ── 方案 A：底部区域固定高度，不随内容变化 ──────────────────
 	var bottom_panel = PanelContainer.new()
-	bottom_panel.custom_minimum_size = Vector2(0, 56)
+	# 固定最小高度，clip 内容防止撑大布局
+	bottom_panel.custom_minimum_size = Vector2(0, 62)
+	bottom_panel.size_flags_vertical = Control.SIZE_SHRINK_END
+	bottom_panel.clip_contents = true
 	bottom_panel.add_theme_stylebox_override("panel", UITheme.make_panel(UITheme.COLORS["bg_panel"]))
 	main_vbox.add_child(bottom_panel)
 
@@ -172,14 +357,19 @@ func _build_ui() -> void:
 	bottom_hbox.add_theme_constant_override("separation", 10)
 	bottom_panel.add_child(bottom_hbox)
 
+	# detail label：固定宽度参与布局，autowrap 保证换行而非撑宽
 	_detail_label = Label.new()
 	_detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_detail_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_detail_label.clip_text = false
 	UITheme.style_label(_detail_label, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
-	_detail_label.text = "选择物品查看详情"
+	_detail_label.text = "鼠标悬停查看详情"
 	bottom_hbox.add_child(_detail_label)
 
 	_actions_box = VBoxContainer.new()
-	_actions_box.custom_minimum_size = Vector2(70, 0)
+	_actions_box.custom_minimum_size = Vector2(72, 0)
+	_actions_box.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_actions_box.add_theme_constant_override("separation", 3)
 	_actions_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	bottom_hbox.add_child(_actions_box)
@@ -196,6 +386,7 @@ func open() -> void:
 
 
 func _on_close() -> void:
+	_hide_tooltip()
 	visible = false
 	get_tree().paused = false
 	closed.emit()
@@ -213,16 +404,18 @@ func _change_page(dir: int) -> void:
 	var total = _player.stats.inventory.size()
 	var max_page = maxi(0, (total - 1) / ITEMS_PER_PAGE)
 	_inv_page = clampi(_inv_page + dir, 0, max_page)
+	_hide_tooltip()
 	_refresh()
 
 
 func _refresh() -> void:
+	_hide_tooltip()
 	for child in _equip_list.get_children():
 		child.queue_free()
 	for child in _item_list.get_children():
 		child.queue_free()
 	_clear_actions()
-	_detail_label.text = "选择物品查看详情"
+	_detail_label.text = "鼠标悬停查看详情"
 	_detail_label.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
 
 	if not _player:
@@ -296,145 +489,103 @@ func _create_item_button(item: Dictionary, is_inv: bool, index: int, slot_prefix
 		_selected_item = item
 		_selected_index = index
 		_is_inventory_item = is_inv
-		_show_detail(item, is_inv)
+		_show_selected_detail(item, is_inv)
 	)
 	btn.mouse_entered.connect(func():
-		_show_detail(item, is_inv)
+		_show_tooltip(item, is_inv)
+		# 底部只显示物品名，不改变布局
+		_detail_label.text = "[%s] %s" % [item.get("rarity_name", ""), item.get("name", "???")]
+		_detail_label.add_theme_color_override("font_color", item.get("color", Color.WHITE))
+	)
+	btn.mouse_exited.connect(func():
+		_hide_tooltip()
+		if _selected_item.is_empty():
+			_detail_label.text = "鼠标悬停查看详情"
+			_detail_label.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+		else:
+			_detail_label.text = "[%s] %s" % [_selected_item.get("rarity_name", ""), _selected_item.get("name", "???")]
+			_detail_label.add_theme_color_override("font_color", _selected_item.get("color", Color.WHITE))
 	)
 	return btn
 
 
-func _format_diff(label: String, new_val: int, old_val: int) -> String:
-	var diff: int = new_val - old_val
-	if diff > 0:
-		return "%s+%d(↑%d)" % [label, new_val, diff]
-	elif diff < 0:
-		return "%s+%d(↓%d)" % [label, new_val, -diff]
-	elif new_val > 0:
-		return "%s+%d(=)" % [label, new_val]
-	return ""
-
-
-func _show_detail(item: Dictionary, is_inv: bool) -> void:
-	var rarity_name = item.get("rarity_name", "未知")
-	var slot_name = ItemDatabase.SLOT_NAMES.get(item.get("slot", 0), "未知")
-	var name_str = item.get("name", "???")
-	var color = item.get("color", Color.WHITE)
-
-	var lines: Array[String] = ["[%s] %s  (%s)" % [rarity_name, name_str, slot_name]]
-
-	var slot_id: int = item.get("slot", 0)
-	var equipped: Dictionary = {}
-	if _player and _player.stats.equipment.has(slot_id):
-		equipped = _player.stats.equipment[slot_id]
-
-	var has_compare: bool = is_inv and not equipped.is_empty() and equipped.get("uid", "") != item.get("uid", "")
-
-	if has_compare:
-		var parts: Array[String] = []
-		var d_atk = _format_diff("攻击", item.get("attack", 0), equipped.get("attack", 0))
-		var d_def = _format_diff("防御", item.get("defense", 0), equipped.get("defense", 0))
-		var d_hp = _format_diff("生命", item.get("hp", 0), equipped.get("hp", 0))
-		var d_spd = _format_diff("速度", item.get("speed", 0), equipped.get("speed", 0))
-		for s in [d_atk, d_def, d_hp, d_spd]:
-			if s != "":
-				parts.append(s)
-		if not parts.is_empty():
-			lines.append("  ".join(parts))
-		lines.append("对比: %s" % equipped.get("name", "???"))
-	else:
-		var stats: Array[String] = []
-		if item.get("attack", 0) > 0:
-			stats.append("攻击+%d" % item["attack"])
-		if item.get("defense", 0) > 0:
-			stats.append("防御+%d" % item["defense"])
-		if item.get("hp", 0) > 0:
-			stats.append("生命+%d" % item["hp"])
-		var spd = item.get("speed", 0)
-		if spd != 0:
-			stats.append("速度%+d" % spd)
-		if not stats.is_empty():
-			lines.append("  ".join(stats))
-
+func _show_selected_detail(item: Dictionary, is_inv: bool) -> void:
 	var sell_price: int = item.get("sell_price", 0)
-	lines.append("售价 %d 金" % sell_price)
-
-	_detail_label.text = "\n".join(lines)
-	_detail_label.add_theme_color_override("font_color", color)
-
 	_clear_actions()
 	if is_inv:
 		var equip_btn = Button.new()
 		equip_btn.text = "装备"
-		equip_btn.custom_minimum_size = Vector2(60, 22)
+		equip_btn.custom_minimum_size = Vector2(68, 22)
 		UITheme.style_button(equip_btn, UITheme.FONT_SIZE_SMALL)
 		equip_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
 		equip_btn.pressed.connect(func():
 			_player.stats.equip_item(_selected_item)
+			_selected_item = {}
 			_refresh()
 		)
 		_actions_box.add_child(equip_btn)
 
 		var sell_btn = Button.new()
-		sell_btn.text = "出售 +%d金" % sell_price
-		sell_btn.custom_minimum_size = Vector2(60, 22)
+		sell_btn.text = "+%d金 出售" % sell_price
+		sell_btn.custom_minimum_size = Vector2(68, 22)
 		UITheme.style_button(sell_btn, UITheme.FONT_SIZE_SMALL)
 		sell_btn.add_theme_color_override("font_color", Color(1.0, 0.80, 0.20))
 		sell_btn.pressed.connect(func():
 			_player.stats.remove_from_inventory(_selected_item)
 			GameManager.add_gold(sell_price)
 			_show_sell_flash(sell_price)
+			_selected_item = {}
 			_refresh()
 		)
 		_actions_box.add_child(sell_btn)
 
 		var drop_btn = Button.new()
 		drop_btn.text = "丢弃"
-		drop_btn.custom_minimum_size = Vector2(60, 22)
+		drop_btn.custom_minimum_size = Vector2(68, 22)
 		UITheme.style_button(drop_btn, UITheme.FONT_SIZE_SMALL)
 		drop_btn.add_theme_color_override("font_color", Color(0.6, 0.35, 0.35))
 		drop_btn.pressed.connect(func():
 			_player.stats.remove_from_inventory(_selected_item)
+			_selected_item = {}
 			_refresh()
 		)
 		_actions_box.add_child(drop_btn)
 	else:
 		var unequip_btn = Button.new()
 		unequip_btn.text = "卸下"
-		unequip_btn.custom_minimum_size = Vector2(60, 22)
+		unequip_btn.custom_minimum_size = Vector2(68, 22)
 		UITheme.style_button(unequip_btn, UITheme.FONT_SIZE_SMALL)
 		unequip_btn.pressed.connect(func():
 			_player.stats.unequip_item(_selected_index)
+			_selected_item = {}
 			_refresh()
 		)
 		_actions_box.add_child(unequip_btn)
 
 		var sell_eq_btn = Button.new()
-		sell_eq_btn.text = "出售 +%d金" % sell_price
-		sell_eq_btn.custom_minimum_size = Vector2(60, 22)
+		sell_eq_btn.text = "+%d金 出售" % sell_price
+		sell_eq_btn.custom_minimum_size = Vector2(68, 22)
 		UITheme.style_button(sell_eq_btn, UITheme.FONT_SIZE_SMALL)
 		sell_eq_btn.add_theme_color_override("font_color", Color(1.0, 0.80, 0.20))
 		sell_eq_btn.pressed.connect(func():
 			_player.stats.unequip_item(_selected_index)
-			# unequip 会把装备放回背包，再从背包移除
 			if _selected_item in _player.stats.inventory:
 				_player.stats.remove_from_inventory(_selected_item)
 			GameManager.add_gold(sell_price)
 			_show_sell_flash(sell_price)
+			_selected_item = {}
 			_refresh()
 		)
 		_actions_box.add_child(sell_eq_btn)
 
 
 func _show_sell_flash(amount: int) -> void:
-	# 在详情区显示 "+X金" 飘字
 	var flash = Label.new()
 	flash.text = "+%d 金" % amount
 	flash.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_BODY)
 	flash.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	flash.position = _detail_label.global_position + Vector2(10, -4)
 	flash.z_index = 100
-	# 加到 root 容器上，让它浮在界面上方
 	_root.add_child(flash)
 	var tween = create_tween()
 	tween.tween_property(flash, "position:y", flash.position.y - 18, 0.6)
@@ -469,9 +620,10 @@ func _batch_sell(max_rarity: int) -> void:
 		1: rarity_label = "精良及以下"
 		2: rarity_label = "稀有及以下"
 		_: rarity_label = "装备"
-	_detail_label.text = "已出售 %d 件%s装备，获得 %d 金" % [count, rarity_label, total_gold]
+	_detail_label.text = "出售 %d 件%s，+%d 金" % [count, rarity_label, total_gold]
 	_detail_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	_show_sell_flash(total_gold)
+	_selected_item = {}
 	_refresh()
 
 

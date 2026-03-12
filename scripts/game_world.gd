@@ -139,6 +139,13 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 		floor_src.create_tile(Vector2i(0, 0))
 		ts.add_source(floor_src, 0)
 
+	ts.add_physics_layer()
+	ts.set_physics_layer_collision_layer(0, 1)
+	ts.set_physics_layer_collision_mask(0, 6)
+	var solid_polygon = PackedVector2Array([
+		Vector2(-8, -8), Vector2(8, -8), Vector2(8, 8), Vector2(-8, 8)
+	])
+
 	if wall_tex:
 		var wall_src = TileSetAtlasSource.new()
 		wall_src.texture = wall_tex
@@ -146,15 +153,9 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 		wall_src.create_tile(Vector2i(0, 0))
 		ts.add_source(wall_src, 1)
 
-		ts.add_physics_layer()
-		ts.set_physics_layer_collision_layer(0, 1)
-		ts.set_physics_layer_collision_mask(0, 6)
 		var tile_data = wall_src.get_tile_data(Vector2i(0, 0), 0)
 		tile_data.add_collision_polygon(0)
-		var polygon = PackedVector2Array([
-			Vector2(-8, -8), Vector2(8, -8), Vector2(8, 8), Vector2(-8, 8)
-		])
-		tile_data.set_collision_polygon_points(0, 0, polygon)
+		tile_data.set_collision_polygon_points(0, 0, solid_polygon)
 
 	if void_tex:
 		var void_src = TileSetAtlasSource.new()
@@ -162,6 +163,10 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 		void_src.texture_region_size = Vector2i(16, 16)
 		void_src.create_tile(Vector2i(0, 0))
 		ts.add_source(void_src, 2)
+
+		var void_tile_data = void_src.get_tile_data(Vector2i(0, 0), 0)
+		void_tile_data.add_collision_polygon(0)
+		void_tile_data.set_collision_polygon_points(0, 0, solid_polygon)
 
 	tilemap_layer.tile_set = ts
 	tilemap_layer.collision_enabled = true
