@@ -23,19 +23,17 @@ func setup(dir: Vector2, dmg: int, speed: float, penetrate: int, owner_node: Nod
 	max_penetrate = penetrate
 	owner_ref = owner_node
 
-	# 箭矢精灵
 	var arrow_sprite = Sprite2D.new()
-	var bow_tex = load("res://assets/sprites/items/bow.png")
-	if bow_tex:
-		arrow_sprite.texture = bow_tex
-		arrow_sprite.scale = Vector2(0.6, 0.6)
+	var arrow_tex = load("res://assets/sprites/projectiles/arrow_green.png")
+	if arrow_tex:
+		arrow_sprite.texture = arrow_tex
+		arrow_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	else:
 		var shaft = ColorRect.new()
 		shaft.size = Vector2(10, 2)
 		shaft.position = Vector2(-5, -1)
 		shaft.color = Color(0.5, 1.0, 0.55)
 		add_child(shaft)
-	arrow_sprite.modulate = Color(0.7, 1.0, 0.7)
 	add_child(arrow_sprite)
 
 	rotation = dir.angle()
@@ -59,17 +57,17 @@ func _on_body_entered(body: Node2D) -> void:
 		if owner_ref.has_method("_camera_shake"):
 			owner_ref._camera_shake(1.5, 0.08)
 
-	# 箭矢命中闪光
-	var flash = ColorRect.new()
-	flash.size = Vector2(5, 5)
-	flash.position = Vector2(-2.5, -2.5)
-	flash.color = Color(0.7, 1.0, 0.6, 0.9)
-	get_parent().add_child(flash)
-	flash.global_position = body.global_position
-	var ftw = create_tween()
-	ftw.tween_property(flash, "scale", Vector2(2.0, 2.0), 0.08)
-	ftw.parallel().tween_property(flash, "modulate:a", 0.0, 0.10)
-	ftw.tween_callback(flash.queue_free)
+	var spark_tex = load("res://assets/sprites/projectiles/hit_spark_green.png")
+	if spark_tex:
+		var spark = Sprite2D.new()
+		spark.texture = spark_tex
+		spark.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		spark.global_position = body.global_position
+		get_parent().add_child(spark)
+		var ftw = create_tween()
+		ftw.tween_property(spark, "scale", Vector2(1.8, 1.8), 0.1)
+		ftw.parallel().tween_property(spark, "modulate:a", 0.0, 0.12)
+		ftw.tween_callback(spark.queue_free)
 
 	if _hit_count >= max_penetrate:
 		queue_free()

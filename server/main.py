@@ -15,6 +15,8 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from udp_relay import relay_manager
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:postgres@localhost:5432/pdgame",
@@ -38,7 +40,13 @@ async def _cleanup_stale_rooms():
         if pool is None:
             continue
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=ROOM_TTL_SECONDS)
+        stale = await pool.fetch(
+            "SELECT room_code FROM rooms WHERE heartbeat < $1", cutoff
+        )
+        for row in stale:
+            relay_manager.destroy(row["room_code"])
         await pool.execute("DELETE FROM rooms WHERE heartbeat < $1", cutoff)
+        await relay_manager.cleanup_stale()
 
 
 @asynccontextmanager
@@ -83,6 +91,7 @@ class RoomOut(BaseModel):
     max_players: int
     cur_players: int
     status: str
+    relay_port: int = 0
     created_at: str
 
 
@@ -96,15 +105,21 @@ async def create_room(body: CreateRoomReq, request: Request):
 
     for _ in range(10):
         code = _gen_code()
+        relay_port = await relay_manager.create(code)
+        if relay_port is None:
+            raise HTTPException(503, "无可用中继端口")
         try:
             row = await pool.fetchrow(
-                """INSERT INTO rooms (room_code, room_name, host_ip, host_lan_ip, host_port, max_players)
-                   VALUES ($1, $2, $3, $4, $5, $6)
+                """INSERT INTO rooms
+                   (room_code, room_name, host_ip, host_lan_ip, host_port, max_players, relay_port)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
                    RETURNING *""",
-                code, body.room_name, host_ip, body.host_lan_ip, body.host_port, body.max_players,
+                code, body.room_name, host_ip, body.host_lan_ip,
+                body.host_port, body.max_players, relay_port,
             )
             return _row_to_out(row)
         except asyncpg.UniqueViolationError:
+            relay_manager.destroy(code)
             continue
 
     raise HTTPException(500, "无法生成唯一房间码")
@@ -168,6 +183,7 @@ async def leave_room(code: str):
         raise HTTPException(404, "房间不存在")
     new_count = max(0, row["cur_players"] - 1)
     if new_count == 0:
+        relay_manager.destroy(code.upper())
         await pool.execute("DELETE FROM rooms WHERE room_code = $1", code.upper())
     else:
         await pool.execute(
@@ -181,8 +197,10 @@ async def leave_room(code: str):
 async def update_status(code: str, request: Request):
     body = await request.json()
     new_status = body.get("status", "waiting")
-    if new_status not in ("waiting", "playing", "closed"):
+    if new_status not in ("waiting", "playing", "closed", "offline"):
         raise HTTPException(400, "无效状态")
+    if new_status in ("closed", "offline"):
+        relay_manager.destroy(code.upper())
     result = await pool.execute(
         "UPDATE rooms SET status = $1, heartbeat = NOW() WHERE room_code = $2",
         new_status, code.upper(),
@@ -194,6 +212,7 @@ async def update_status(code: str, request: Request):
 
 @app.delete("/api/rooms/{code}")
 async def delete_room(code: str):
+    relay_manager.destroy(code.upper())
     await pool.execute("DELETE FROM rooms WHERE room_code = $1", code.upper())
     return {"ok": True}
 
@@ -215,5 +234,6 @@ def _row_to_out(row) -> dict:
         "max_players": row["max_players"],
         "cur_players": row["cur_players"],
         "status": row["status"],
+        "relay_port": row.get("relay_port", 0),
         "created_at": row["created_at"].isoformat(),
     }

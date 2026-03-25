@@ -134,10 +134,11 @@ func _shoot_dark_bolt() -> void:
 	bolt.collision_layer = 0
 	bolt.collision_mask = 3
 
-	var spr = ColorRect.new()
-	spr.size = Vector2(5, 5)
-	spr.position = Vector2(-2.5, -2.5)
-	spr.color = Color(0.6, 0.2, 1.0, 0.9)
+	var spr = Sprite2D.new()
+	var tex = load("res://assets/sprites/projectiles/orb_purple.png")
+	if tex:
+		spr.texture = tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	bolt.add_child(spr)
 
 	var col = CollisionShape2D.new()

@@ -1,0 +1,70 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/virtual_joystick.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/ui/touch_buttons.gd" id="2"]
+
+[node name="TouchControls" type="CanvasLayer"]
+layer = 5
+process_mode = 3
+
+[node name="Joystick" type="Control" parent="."]
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = -110.0
+offset_right = 118.0
+offset_bottom = -8.0
+mouse_filter = 2
+script = ExtResource("1")
+
+[node name="BG" type="ColorRect" parent="Joystick"]
+offset_left = 5.0
+offset_top = 5.0
+offset_right = 105.0
+offset_bottom = 105.0
+color = Color(1, 1, 1, 0.12)
+
+[node name="Knob" type="ColorRect" parent="Joystick"]
+offset_left = 40.0
+offset_top = 40.0
+offset_right = 70.0
+offset_bottom = 70.0
+color = Color(1, 1, 1, 0.45)
+
+[node name="ActionButtons" type="Control" parent="."]
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -170.0
+offset_top = -120.0
+offset_right = -8.0
+offset_bottom = -8.0
+mouse_filter = 2
+script = ExtResource("2")
+
+[node name="InventoryBtn" type="Button" parent="."]
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = -108.0
+offset_right = 48.0
+offset_bottom = -76.0
+process_mode = 3
+text = "包"
+
+[node name="PauseBtn" type="Button" parent="."]
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 52.0
+offset_top = -108.0
+offset_right = 92.0
+offset_bottom = -76.0
+process_mode = 3
+text = "‖"

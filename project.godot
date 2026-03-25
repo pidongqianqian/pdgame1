@@ -31,6 +31,7 @@ UITheme="*res://scripts/ui/ui_theme.gd"
 NetworkManager="*res://scripts/network/network_manager.gd"
 CloudRoomAPI="*res://scripts/network/cloud_room_api.gd"
 SkillDatabase="*res://scripts/skills/skill_database.gd"
+VfxManager="*res://scripts/managers/vfx_manager.gd"
 
 [display]
 
@@ -40,6 +41,7 @@ window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/handheld/orientation="landscape"
 
 [input]
 

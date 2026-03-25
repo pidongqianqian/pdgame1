@@ -3,7 +3,7 @@ extends Area2D
 var item_data: Dictionary = {}
 var _bob_tween: Tween
 var _name_label: Label
-var _glow_light: PointLight2D
+var _glow_sprite: Sprite2D
 
 @onready var sprite: Sprite2D = $Sprite2D
 
@@ -23,8 +23,19 @@ func _ready() -> void:
 	var rarity: int = item_data.get("rarity", 0)
 	var item_color = item_data.get("color", Color.WHITE)
 
-	if item_data.has("color"):
+	var icon_path: String = item_data.get("icon", "")
+	if icon_path != "":
+		var tex = load(icon_path)
+		if tex:
+			sprite.texture = tex
+			sprite.modulate = Color.WHITE
+	elif item_data.has("color"):
 		sprite.modulate = item_color
+
+	var drop_scale: float = 0.5
+	if OS.has_feature("android") or OS.has_feature("mobile"):
+		drop_scale = 1.0
+	sprite.scale = Vector2(drop_scale, drop_scale)
 
 	# 物品名称标签
 	_name_label = Label.new()
@@ -49,39 +60,37 @@ func _ready() -> void:
 func _create_glow_light(rarity: int) -> void:
 	var glow_data = RARITY_GLOW.get(rarity, RARITY_GLOW[0])
 
-	_glow_light = PointLight2D.new()
-	_glow_light.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	_glow_light.texture = _make_light_texture()
-	_glow_light.texture_scale = 1.8 + rarity * 0.4
-	_glow_light.color = glow_data["color"]
-	_glow_light.energy = glow_data["energy"]
-	_glow_light.blend_mode = PointLight2D.BLEND_MODE_ADD
-	add_child(_glow_light)
+	var size: int = 32
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var center: float = size / 2.0
+	var max_r: float = size / 2.0
+	for y in size:
+		for x in size:
+			var dx: float = x - center + 0.5
+			var dy: float = y - center + 0.5
+			var dist: float = sqrt(dx * dx + dy * dy) / max_r
+			var a: float = 0.0
+			if dist < 1.0:
+				var t: float = 1.0 - dist
+				a = t * t * 0.65
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
 
-	# 光照脉冲动画
-	var pulse = create_tween()
+	_glow_sprite = Sprite2D.new()
+	_glow_sprite.texture = ImageTexture.create_from_image(img)
+	_glow_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var glow_scale: float = 0.6 + rarity * 0.15
+	_glow_sprite.scale = Vector2(glow_scale, glow_scale)
+	_glow_sprite.modulate = Color(glow_data["color"].r, glow_data["color"].g,
+		glow_data["color"].b, glow_data["energy"])
+	_glow_sprite.z_index = -1
+	add_child(_glow_sprite)
+
+	var pulse := create_tween()
 	pulse.set_loops()
-	pulse.tween_property(_glow_light, "energy",
-		glow_data["energy"] * 1.4, 0.8).set_trans(Tween.TRANS_SINE)
-	pulse.tween_property(_glow_light, "energy",
-		glow_data["energy"] * 0.7, 0.8).set_trans(Tween.TRANS_SINE)
-
-
-func _make_light_texture() -> GradientTexture2D:
-	var tex = GradientTexture2D.new()
-	tex.fill = GradientTexture2D.FILL_RADIAL
-	tex.fill_from = Vector2(0.5, 0.5)
-	tex.fill_to   = Vector2(1.0, 0.5)
-	var g = Gradient.new()
-	g.add_point(0.0, Color(1, 1, 1, 0.8))
-	g.add_point(0.25, Color(1, 1, 1, 0.35))
-	g.add_point(0.5, Color(1, 1, 1, 0.08))
-	g.add_point(0.65, Color(1, 1, 1, 0))
-	g.add_point(1.0, Color(1, 1, 1, 0))
-	tex.gradient = g
-	tex.width = 64
-	tex.height = 64
-	return tex
+	var hi_a: float = glow_data["energy"] * 1.3
+	var lo_a: float = glow_data["energy"] * 0.6
+	pulse.tween_property(_glow_sprite, "modulate:a", hi_a, 0.8).set_trans(Tween.TRANS_SINE)
+	pulse.tween_property(_glow_sprite, "modulate:a", lo_a, 0.8).set_trans(Tween.TRANS_SINE)
 
 
 func _create_sparkle_effect(rarity: int) -> void:

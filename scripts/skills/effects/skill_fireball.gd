@@ -64,6 +64,7 @@ func _explode() -> void:
 			var dir: Vector2 = global_position.direction_to(e.global_position)
 			(e as EnemyBase).take_damage(_damage, dir * 1.5)
 
+	VfxManager.play_at("fx2_starburst", global_position, "orange", 0.55, 30.0)
 	if _player and is_instance_valid(_player):
 		_player._camera_shake(4.0, 0.2)
 

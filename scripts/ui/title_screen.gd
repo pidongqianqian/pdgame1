@@ -58,11 +58,26 @@ func _build_ui() -> void:
 	spacer.custom_minimum_size = Vector2(0, 20)
 	center.add_child(spacer)
 
+	# 如果有未完成的存档，显示"继续"按钮
+	if SaveManager.has_active_run():
+		var run = SaveManager.get_run_summary()
+		var floor_num: int = run.get("floor", 1)
+
+		var continue_btn = Button.new()
+		continue_btn.text = "继续冒险  (第 %d 层)" % floor_num
+		continue_btn.custom_minimum_size = Vector2(200, 32)
+		UITheme.style_button(continue_btn, UITheme.FONT_SIZE_HEADER)
+		continue_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+		continue_btn.pressed.connect(_on_continue_pressed)
+		center.add_child(continue_btn)
+
+	var has_save: bool = SaveManager.has_active_run()
 	var start_btn = Button.new()
-	start_btn.text = "开始冒险"
+	start_btn.text = "新游戏" if has_save else "开始冒险"
 	start_btn.custom_minimum_size = Vector2(160, 28)
-	UITheme.style_button(start_btn, UITheme.FONT_SIZE_HEADER)
-	start_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+	UITheme.style_button(start_btn, UITheme.FONT_SIZE_BODY if has_save else UITheme.FONT_SIZE_HEADER)
+	if not has_save:
+		start_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
 	start_btn.pressed.connect(_on_start_pressed)
 	center.add_child(start_btn)
 
@@ -167,10 +182,78 @@ func _process(delta: float) -> void:
 		idx += 1
 
 
+func _on_continue_pressed() -> void:
+	var main = get_tree().current_scene
+	if main.has_method("start_game"):
+		main.start_game()
+
+
 func _on_start_pressed() -> void:
 	var main = get_tree().current_scene
-	if main.has_method("go_to_class_select"):
+	if SaveManager.has_active_run():
+		# 新游戏：先弹确认
+		_confirm_new_game()
+	elif main.has_method("go_to_class_select"):
 		main.go_to_class_select()
+
+
+func _confirm_new_game() -> void:
+	# 弹出确认对话框
+	var overlay = ColorRect.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0, 0, 0, 0.6)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(overlay)
+
+	var panel = PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.offset_left = -130; panel.offset_right = 130
+	panel.offset_top = -60; panel.offset_bottom = 60
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.05, 0.14, 0.97)
+	sb.border_color = Color(0.6, 0.4, 0.8, 0.8)
+	sb.set_border_width_all(2); sb.set_corner_radius_all(5)
+	sb.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", sb)
+	overlay.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 10)
+	panel.add_child(vbox)
+
+	var lbl = Label.new()
+	lbl.text = "开始新游戏将覆盖当前存档\n确定要放弃现有进度吗？"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UITheme.style_label(lbl, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
+	vbox.add_child(lbl)
+
+	var row = HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	vbox.add_child(row)
+
+	var confirm = Button.new()
+	confirm.text = "确定"
+	confirm.custom_minimum_size = Vector2(80, 28)
+	UITheme.style_button(confirm, UITheme.FONT_SIZE_BODY)
+	confirm.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+	confirm.pressed.connect(func():
+		overlay.queue_free()
+		SaveManager.clear_run()
+		var main = get_tree().current_scene
+		if main.has_method("go_to_class_select"):
+			main.go_to_class_select()
+	)
+	row.add_child(confirm)
+
+	var cancel = Button.new()
+	cancel.text = "取消"
+	cancel.custom_minimum_size = Vector2(80, 28)
+	UITheme.style_button(cancel, UITheme.FONT_SIZE_BODY)
+	cancel.pressed.connect(func(): overlay.queue_free())
+	row.add_child(cancel)
 
 
 func _on_multiplayer_pressed() -> void:

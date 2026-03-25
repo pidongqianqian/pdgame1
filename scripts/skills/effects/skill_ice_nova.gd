@@ -25,6 +25,7 @@ func execute(player: Player, data: Dictionary) -> void:
 			if e.has_method("apply_freeze"):
 				(e as EnemyBase).apply_freeze(freeze_dur)
 
+	VfxManager.play_at("fx2_starburst", global_position, "cyan", 0.55, 30.0)
 	player._camera_shake(3.0, 0.15)
 
 	await get_tree().create_timer(0.6).timeout

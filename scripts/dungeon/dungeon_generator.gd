@@ -23,6 +23,7 @@ var room_enemy_counts: Array[int] = []
 var room_doors: Dictionary = {}
 var boss_room_index: int = -1
 var current_room_index: int = -1
+var floor_variant_count: int = 1
 
 @onready var tilemap: TileMapLayer = $TileMapLayer
 
@@ -157,7 +158,8 @@ func _apply_to_tilemap() -> void:
 			if _in_bounds(x, y):
 				var tile_type = grid[y][x]
 				if tile_type == TileType.FLOOR:
-					tilemap.set_cell(Vector2i(x, y), 0, Vector2i(0, 0))
+					var variant: int = randi() % floor_variant_count
+					tilemap.set_cell(Vector2i(x, y), 0, Vector2i(variant, 0))
 				elif tile_type == TileType.WALL:
 					if _is_visible_wall(x, y):
 						tilemap.set_cell(Vector2i(x, y), 1, Vector2i(0, 0))

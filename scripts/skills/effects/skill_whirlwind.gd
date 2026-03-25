@@ -23,6 +23,7 @@ func execute(player: Player, data: Dictionary) -> void:
 			(e as EnemyBase).take_damage(dmg, dir * 2.0)
 
 	player._camera_shake(3.5, 0.2)
+	VfxManager.play_at("fx2_energy_sphere", global_position, "cyan", 0.5, 30.0)
 	await get_tree().create_timer(0.6).timeout
 	queue_free()
 

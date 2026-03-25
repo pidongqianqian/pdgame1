@@ -128,15 +128,18 @@ func close_room() -> void:
 		return
 	var code: String = current_room_code
 	current_room_code = ""
+	# 先将房间状态设为 offline，让其他玩家看到"离线"
+	var body: String = JSON.stringify({"status": "offline"})
 	var http := HTTPRequest.new()
 	add_child(http)
 	http.request_completed.connect(func(_r: int, _c: int, _h: PackedStringArray, _b: PackedByteArray):
 		http.queue_free()
 	)
 	http.request(
-		api_url + "/api/rooms/" + code,
-		[],
-		HTTPClient.METHOD_DELETE,
+		api_url + "/api/rooms/" + code + "/status",
+		["Content-Type: application/json"],
+		HTTPClient.METHOD_PUT,
+		body,
 	)
 
 

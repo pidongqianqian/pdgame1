@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 var _player: Player = null
+var _game_world: Node = null
 
 var _hp_bar: Control
 var _hp_fill: ColorRect
@@ -34,10 +35,16 @@ const BAR_WIDTH = 100
 const BAR_HEIGHT = 10
 const XP_BAR_WIDTH = 100
 const XP_BAR_HEIGHT = 5
-const SKILL_ICON_SIZE = 22
+const SKILL_ICON_SIZE_DESKTOP = 22
+const SKILL_ICON_SIZE_MOBILE  = 36
+var SKILL_ICON_SIZE: int = SKILL_ICON_SIZE_DESKTOP
+
+var _is_mobile: bool = false
 
 
 func _ready() -> void:
+	_is_mobile = OS.has_feature("android") or OS.has_feature("mobile")
+	SKILL_ICON_SIZE = SKILL_ICON_SIZE_MOBILE if _is_mobile else SKILL_ICON_SIZE_DESKTOP
 	add_to_group("hud")
 	GameManager.floor_changed.connect(_on_floor_changed)
 	GameManager.gold_changed.connect(_on_gold_changed)
@@ -129,6 +136,25 @@ func _build_hud() -> void:
 	UITheme.style_label(_souls_label, UITheme.FONT_SIZE_SMALL, Color(0.6, 0.7, 1.0))
 	top_right.add_child(_souls_label)
 
+	# 桌面端暂停按钮（手机端用触控层的"‖"按钮）
+	if not _is_mobile:
+		var pause_btn = Button.new()
+		pause_btn.text = "  ‖ 暂停  "
+		pause_btn.flat = true
+		pause_btn.custom_minimum_size = Vector2(60, 18)
+		UITheme.style_button(pause_btn, UITheme.FONT_SIZE_TINY)
+		pause_btn.add_theme_color_override("font_color", UITheme.COLORS["text_dim"])
+		pause_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		pause_btn.pressed.connect(func():
+			if not _game_world or not is_instance_valid(_game_world):
+				return
+			if _game_world.get("_pause_ui") != null and _game_world._pause_ui:
+				_game_world._hide_pause_menu()
+			else:
+				_game_world._show_pause_menu()
+		)
+		top_right.add_child(pause_btn)
+
 	# 拾取提示 —— 锚定底部居中
 	_pickup_label = Label.new()
 	_pickup_label.anchor_left   = 0.5
@@ -216,8 +242,9 @@ func _build_skill_icons() -> void:
 	skill_row.anchor_top = 1.0
 	skill_row.anchor_bottom = 1.0
 	skill_row.offset_left = 8
-	skill_row.offset_top = -38
-	skill_row.offset_bottom = -18
+	var row_h: int = SKILL_ICON_SIZE + 6
+	skill_row.offset_top = -(row_h + 8)
+	skill_row.offset_bottom = -8
 	skill_row.add_theme_constant_override("separation", 6)
 	add_child(skill_row)
 
@@ -268,11 +295,12 @@ func _create_skill_slot(skill_id: String, key: String) -> Control:
 	cd_overlay.visible = false
 	container.add_child(cd_overlay)
 
-	# 按键提示
+	# 按键提示（移动端不显示）
 	var key_lbl = Label.new()
 	key_lbl.text = key
 	key_lbl.position = Vector2(SKILL_ICON_SIZE + 1, SKILL_ICON_SIZE - 8)
 	UITheme.style_label(key_lbl, UITheme.FONT_SIZE_TINY, Color(0.7, 0.65, 0.8, 0.6))
+	key_lbl.visible = not _is_mobile
 	container.add_child(key_lbl)
 
 	if key == "U":
@@ -302,8 +330,6 @@ func _process(delta: float) -> void:
 			_update_hp_display(_player.stats.current_hp, _player.stats.get_total_max_hp())
 			if _player.skill_manager:
 				_player.skill_manager.skill_cooldown_changed.connect(_on_skill_cd_changed)
-	elif _player and _player.stats:
-		_update_hp_display(_player.stats.current_hp, _player.stats.get_total_max_hp())
 
 	# 多人模式：更新/创建其他玩家的 HP 条
 	if NetworkManager.is_multiplayer_active() and _mp_bar_container:
@@ -459,3 +485,7 @@ func _on_skill_cd_changed(slot: int, remaining: float, total: float) -> void:
 	var h: float = SKILL_ICON_SIZE * ratio
 	overlay.size = Vector2(SKILL_ICON_SIZE, h)
 	overlay.position = Vector2(0, SKILL_ICON_SIZE - h)
+
+
+func set_game_world(gw: Node) -> void:
+	_game_world = gw

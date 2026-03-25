@@ -137,10 +137,12 @@ func _spawn_fireball(dir: Vector2) -> void:
 	proj.collision_layer = 0
 	proj.collision_mask = 3
 
-	var spr = ColorRect.new()
-	spr.size = Vector2(4, 4)
-	spr.position = Vector2(-2, -2)
-	spr.color = Color(1.0, 0.4, 0.1, 0.9)
+	var spr = Sprite2D.new()
+	var tex = load("res://assets/sprites/projectiles/fireball.png")
+	if tex:
+		spr.texture = tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.rotation = dir.angle()
 	proj.add_child(spr)
 
 	var col = CollisionShape2D.new()

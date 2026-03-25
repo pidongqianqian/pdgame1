@@ -8,9 +8,13 @@ CREATE TABLE IF NOT EXISTS rooms (
     max_players INTEGER     NOT NULL DEFAULT 4,
     cur_players INTEGER     NOT NULL DEFAULT 1,
     status      VARCHAR(16) NOT NULL DEFAULT 'waiting',
+    relay_port  INTEGER     NOT NULL DEFAULT 0,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     heartbeat   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_rooms_status ON rooms (status);
 CREATE INDEX IF NOT EXISTS idx_rooms_heartbeat ON rooms (heartbeat);
+
+-- 兼容已有部署：如果表已存在但缺少 relay_port 列
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS relay_port INTEGER NOT NULL DEFAULT 0;

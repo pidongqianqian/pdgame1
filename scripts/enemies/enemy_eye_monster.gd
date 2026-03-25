@@ -67,10 +67,11 @@ func _shoot_beam() -> void:
 	beam.collision_layer = 0
 	beam.collision_mask = 3
 
-	var spr = ColorRect.new()
-	spr.size = Vector2(4, 2)
-	spr.position = Vector2(-2, -1)
-	spr.color = Color(0.2, 0.6, 1.0, 0.9)
+	var spr = Sprite2D.new()
+	var tex = load("res://assets/sprites/projectiles/beam_cyan.png")
+	if tex:
+		spr.texture = tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	beam.add_child(spr)
 
 	var col = CollisionShape2D.new()

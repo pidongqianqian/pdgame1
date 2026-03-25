@@ -26,26 +26,22 @@ func _ready() -> void:
 	col.shape = shape
 	add_child(col)
 
-	# 硬币精灵（圆形）
-	var coin = ColorRect.new()
-	var s = cfg["size"]
-	coin.size = Vector2(s * 2, s * 2)
-	coin.position = Vector2(-s, -s)
-	coin.color = cfg["color"]
+	var coin_tex = load("res://assets/sprites/items/gold_coin.png")
+	var coin = Sprite2D.new()
+	if coin_tex:
+		coin.texture = coin_tex
+		coin.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var coin_scale: float = float(cfg["size"]) / 16.0
+	if OS.has_feature("android") or OS.has_feature("mobile"):
+		coin_scale *= 2.0
+	coin.scale = Vector2(coin_scale, coin_scale)
 	add_child(coin)
-
-	# 内层高光
-	var hi = ColorRect.new()
-	hi.size = Vector2(s, s)
-	hi.position = Vector2(-s + 1, -s + 1)
-	hi.color = Color(1.0, 1.0, 0.85, 0.7)
-	add_child(hi)
 
 	# 金额标签
 	_label = Label.new()
 	_label.text = "+%d" % gold_amount
 	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label.position = Vector2(-12, -(s * 2 + 8))
+	_label.position = Vector2(-12, -(cfg["size"] * 2 + 8))
 	_label.size = Vector2(24, 10)
 	_label.add_theme_font_size_override("font_size", 5)
 	_label.add_theme_color_override("font_color", cfg["color"])
@@ -58,10 +54,9 @@ func _ready() -> void:
 	var tween = create_tween()
 	tween.tween_property(self, "position:y", position.y + (position.y - start_y) * -1 + randf_range(2, 6), 0.25).set_trans(Tween.TRANS_BOUNCE)
 
-	# 旋转动画
-	var rot_tween = create_tween().set_loops()
-	rot_tween.tween_property(coin, "modulate:a", 0.6, 0.4)
-	rot_tween.tween_property(coin, "modulate:a", 1.0, 0.4)
+	var shimmer = create_tween().set_loops()
+	shimmer.tween_property(coin, "modulate", Color(1.2, 1.2, 0.9), 0.4)
+	shimmer.tween_property(coin, "modulate", Color.WHITE, 0.4)
 
 	body_entered.connect(_on_body_entered)
 

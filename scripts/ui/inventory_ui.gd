@@ -64,13 +64,30 @@ func _show_tooltip(item: Dictionary, is_inv: bool) -> void:
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tooltip.add_child(vbox)
 
-	# 标题行
+	# 标题行（图标 + 名称）
+	var title_row = HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 4)
+	title_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(title_row)
+
+	var tip_icon_path: String = item.get("icon", "")
+	if tip_icon_path != "":
+		var tip_tex = load(tip_icon_path)
+		if tip_tex:
+			var tip_icon = TextureRect.new()
+			tip_icon.texture = tip_tex
+			tip_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			tip_icon.custom_minimum_size = Vector2(18, 18)
+			tip_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			tip_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			title_row.add_child(tip_icon)
+
 	var title_lbl = Label.new()
 	title_lbl.text = "[%s] %s" % [item.get("rarity_name", ""), item.get("name", "???")]
 	title_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_SMALL)
 	title_lbl.add_theme_color_override("font_color", item.get("color", Color.WHITE))
 	title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(title_lbl)
+	title_row.add_child(title_lbl)
 
 	# 分隔线
 	var sep = ColorRect.new()
@@ -472,6 +489,13 @@ func _create_item_button(item: Dictionary, is_inv: bool, index: int, slot_prefix
 	else:
 		var rarity_name = item.get("rarity_name", "")
 		btn.text = "%s %s" % [rarity_name, item_name]
+
+	var icon_path: String = item.get("icon", "")
+	if icon_path != "":
+		var icon_tex = load(icon_path)
+		if icon_tex:
+			btn.icon = icon_tex
+			btn.expand_icon = true
 
 	var rarity_bg = UITheme.RARITY_BG.get(rarity, UITheme.COLORS["bg_slot"])
 	btn.add_theme_stylebox_override("normal", UITheme.make_panel(rarity_bg))

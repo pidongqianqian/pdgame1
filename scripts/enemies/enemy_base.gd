@@ -51,12 +51,16 @@ const OOB_CHECK_INTERVAL: float = 0.5
 @onready var hitbox: Area2D = $Hitbox
 @onready var collision: CollisionShape2D = $CollisionShape2D
 
+var _base_sprite_scale: Vector2 = Vector2.ONE
+
 
 func _ready() -> void:
 	current_hp = max_hp
 	_idle_timer = randf_range(0.5, 2.0)
 	_remote_target_pos = global_position
+	z_index = 1
 	add_to_group("enemies")
+	_base_sprite_scale = sprite.scale
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
 
@@ -300,9 +304,9 @@ func _apply_host_damage(amount: int, from_dir: Vector2, attacker_peer: int) -> v
 	_flash_white()
 
 	var tween = create_tween()
-	tween.tween_property(sprite, "scale", Vector2(1.3, 0.7), 0.05)
-	tween.tween_property(sprite, "scale", Vector2(0.9, 1.1), 0.05)
-	tween.tween_property(sprite, "scale", Vector2(1, 1), 0.05)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(1.3, 0.7), 0.05)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(0.9, 1.1), 0.05)
+	tween.tween_property(sprite, "scale", _base_sprite_scale, 0.05)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -337,9 +341,10 @@ func _die() -> void:
 
 
 func _play_death_anim() -> void:
+	VfxManager.play_at("fx_ring_explode", global_position, "orange", 0.4, 35.0)
 	var tween = create_tween()
 	tween.tween_property(sprite, "modulate", Color(1, 0.3, 0.3, 1), 0.1)
-	tween.tween_property(sprite, "scale", Vector2(1.2, 0.3), 0.15)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(1.2, 0.3), 0.15)
 	tween.parallel().tween_property(sprite, "modulate:a", 0.0, 0.3)
 	tween.tween_callback(queue_free)
 

@@ -306,7 +306,10 @@ func _build_ui() -> void:
 func _on_host_pressed() -> void:
 	var err = NetworkManager.create_server()
 	if err != OK:
-		_set_status("创建房间失败：%d" % err, Color(1, 0.3, 0.3))
+		var hint: String = "创建房间失败（错误 %d）" % err
+		if err == 20:
+			hint += "\n端口 %d 可能被占用，或网络不可用" % NetworkManager.DEFAULT_PORT
+		_set_status(hint, Color(1, 0.3, 0.3))
 		return
 	NetworkManager.is_cloud_room = false
 	var ip = NetworkManager.get_local_ip()
@@ -342,21 +345,9 @@ func _on_connected() -> void:
 
 func _on_connection_failed() -> void:
 	if _is_cloud_joining:
-		var tried_lan: bool = _pending_cloud.get("tried_lan", false)
-		var wan_ip: String = _pending_cloud.get("wan_ip", "")
-		if tried_lan and not wan_ip.is_empty():
-			_pending_cloud["tried_lan"] = false
-			_set_status("局域网连接失败，尝试公网IP…", UITheme.COLORS["text_dim"])
-			var port: int = _pending_cloud.get("port", 7777)
-			var err = NetworkManager.join_server(wan_ip, port)
-			if err != OK:
-				_is_cloud_joining = false
-				_pending_cloud = {}
-				_set_status("连接失败：%d" % err, Color(1, 0.3, 0.3))
-			return
 		_is_cloud_joining = false
 		_pending_cloud = {}
-		_set_status("连接失败，房主可能不在同一网络或未开放端口", Color(1, 0.3, 0.3))
+		_set_status("连接云服务器失败，请检查房间是否仍在线", Color(1, 0.3, 0.3))
 		return
 	_set_status("连接失败，请检查IP地址", Color(1, 0.3, 0.3))
 
@@ -380,7 +371,10 @@ func _on_cloud_create_pressed() -> void:
 
 	var err = NetworkManager.create_server()
 	if err != OK:
-		_set_status("创建本地服务器失败：%d" % err, Color(1, 0.3, 0.3))
+		var hint: String = "创建本地服务器失败（错误 %d）" % err
+		if err == 20:
+			hint += "\n端口 %d 可能被占用，或网络不可用" % NetworkManager.DEFAULT_PORT
+		_set_status(hint, Color(1, 0.3, 0.3))
 		return
 	NetworkManager.is_cloud_room = true
 	CloudRoomAPI.create_room("像素深渊")
@@ -388,6 +382,10 @@ func _on_cloud_create_pressed() -> void:
 
 func _on_cloud_room_created(room: Dictionary) -> void:
 	var code: String = room.get("room_code", "???")
+	var relay_port: int = room.get("relay_port", 0)
+	if relay_port > 0:
+		var cloud_ip: String = _extract_host_from_url(CloudRoomAPI.api_url)
+		NetworkManager.start_relay_bridge(cloud_ip, relay_port)
 	_set_status("云房间已创建！", Color(0.5, 1.0, 0.5))
 	_cloud_code_label.text = "☁ 房间码：%s  （分享给好友加入）" % code
 	_cloud_code_label.visible = true
@@ -419,9 +417,25 @@ func _on_cloud_rooms_listed(rooms: Array) -> void:
 		_set_status("没有找到可用房间", UITheme.COLORS["text_dim"])
 		return
 
-	_set_status("找到 %d 个房间" % rooms.size(), Color(0.5, 0.8, 1.0))
-
+	# 过滤掉离线房间
+	var active_rooms: Array = []
 	for room in rooms:
+		var st: String = room.get("status", "waiting")
+		if st != "offline" and st != "closed":
+			active_rooms.append(room)
+
+	if active_rooms.is_empty():
+		var empty = Label.new()
+		empty.text = "暂无可用房间"
+		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UITheme.style_label(empty, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
+		_cloud_room_list.add_child(empty)
+		_set_status("没有找到可用房间", UITheme.COLORS["text_dim"])
+		return
+
+	_set_status("找到 %d 个房间" % active_rooms.size(), Color(0.5, 0.8, 1.0))
+
+	for room in active_rooms:
 		var card = PanelContainer.new()
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var sb = StyleBoxFlat.new()
@@ -470,7 +484,8 @@ func _on_cloud_rooms_listed(rooms: Array) -> void:
 		var host_lan: String = room.get("host_lan_ip", "")
 		var host_wan: String = room.get("host_ip", "")
 		var host_port: int = room.get("host_port", 7777)
-		join_btn.pressed.connect(func(): _join_cloud_room(room_code, host_lan, host_wan, host_port))
+		var r_port: int = room.get("relay_port", 0)
+		join_btn.pressed.connect(func(): _join_cloud_room(room_code, host_lan, host_wan, host_port, r_port))
 		hbox.add_child(join_btn)
 
 
@@ -492,8 +507,8 @@ func _on_cloud_room_joined(_room: Dictionary) -> void:
 	pass
 
 
-func _join_cloud_room(code: String, lan_ip: String, wan_ip: String, port: int) -> void:
-	_start_cloud_connect(code, lan_ip, wan_ip, port)
+func _join_cloud_room(code: String, lan_ip: String, wan_ip: String, port: int, relay_port: int = 0) -> void:
+	_start_cloud_connect(code, lan_ip, wan_ip, port, relay_port)
 
 
 func _fetch_room_then_connect(code: String) -> void:
@@ -511,33 +526,58 @@ func _fetch_room_then_connect(code: String) -> void:
 		var lan_ip: String = parsed.get("host_lan_ip", "")
 		var wan_ip: String = parsed.get("host_ip", "")
 		var port: int = parsed.get("host_port", 7777)
-		_start_cloud_connect(code, lan_ip, wan_ip, port)
+		var r_port: int = parsed.get("relay_port", 0)
+		_start_cloud_connect(code, lan_ip, wan_ip, port, r_port)
 	)
 	http.request(CloudRoomAPI.api_url + "/api/rooms/" + code)
 
 
-func _start_cloud_connect(code: String, lan_ip: String, wan_ip: String, port: int) -> void:
+func _start_cloud_connect(code: String, lan_ip: String, wan_ip: String, port: int, relay_port: int = 0) -> void:
 	_is_cloud_joining = true
-	_pending_cloud = {"code": code, "lan_ip": lan_ip, "wan_ip": wan_ip, "port": port, "tried_lan": false}
+	_pending_cloud = {"code": code}
 
 	var connect_ip: String = ""
-	if not lan_ip.is_empty():
-		connect_ip = lan_ip
-		_pending_cloud["tried_lan"] = true
-		_set_status("正在尝试局域网连接 %s…" % lan_ip, UITheme.COLORS["text_dim"])
+	var connect_port: int = port
+
+	# 有中继端口时优先走中继
+	if relay_port > 0:
+		connect_ip = _extract_host_from_url(CloudRoomAPI.api_url)
+		connect_port = relay_port
+		_set_status("正在通过中继服务器连接…", UITheme.COLORS["text_dim"])
 	elif not wan_ip.is_empty():
 		connect_ip = wan_ip
 		_set_status("正在连接 %s…" % wan_ip, UITheme.COLORS["text_dim"])
+	elif not lan_ip.is_empty():
+		connect_ip = lan_ip
+		_set_status("正在尝试局域网连接 %s…" % lan_ip, UITheme.COLORS["text_dim"])
 	else:
 		_is_cloud_joining = false
 		_set_status("无法获取房间地址", Color(1, 0.3, 0.3))
 		return
 
-	var err = NetworkManager.join_server(connect_ip, port)
+	var err = NetworkManager.join_server(connect_ip, connect_port)
 	if err != OK:
 		_is_cloud_joining = false
 		_pending_cloud = {}
 		_set_status("连接失败：%d" % err, Color(1, 0.3, 0.3))
+
+
+func _extract_host_from_url(url: String) -> String:
+	var s: String = url
+	# 去掉协议头
+	if s.begins_with("http://"):
+		s = s.substr(7)
+	elif s.begins_with("https://"):
+		s = s.substr(8)
+	# 去掉路径
+	var slash_idx: int = s.find("/")
+	if slash_idx >= 0:
+		s = s.substr(0, slash_idx)
+	# 去掉端口号
+	var colon_idx: int = s.rfind(":")
+	if colon_idx >= 0:
+		s = s.substr(0, colon_idx)
+	return s
 
 
 func _on_cloud_error(error: String) -> void:

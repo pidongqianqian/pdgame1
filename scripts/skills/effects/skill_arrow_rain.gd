@@ -36,6 +36,7 @@ func execute(player: Player, data: Dictionary) -> void:
 		player.get_parent().add_child(arrow)
 		arrow.setup(dir, dmg, 120.0, 1, player)
 
+	VfxManager.play_at("fx_burst", global_position, "green", 0.4, 35.0)
 	player._camera_shake(2.5, 0.15)
 	_spawn_vfx(base_dir)
 

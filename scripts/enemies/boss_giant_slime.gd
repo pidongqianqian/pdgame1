@@ -27,7 +27,6 @@ func _ready() -> void:
 	soul_reward = 5
 	xp_reward = 40
 	super._ready()
-	sprite.scale = Vector2(1.8, 1.8)
 	sprite.modulate = Color(0.6, 1.0, 0.4)
 
 
@@ -130,10 +129,12 @@ func _shoot_acid() -> void:
 	projectile.collision_layer = 0
 	projectile.collision_mask = 3
 
-	var spr = ColorRect.new()
-	spr.size = Vector2(4, 4)
-	spr.position = Vector2(-2, -2)
-	spr.color = Color(0.3, 0.9, 0.1, 0.9)
+	var spr = Sprite2D.new()
+	var tex = load("res://assets/sprites/projectiles/acid_spit.png")
+	if tex:
+		spr.texture = tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.rotation = dir.angle()
 	projectile.add_child(spr)
 
 	var col = CollisionShape2D.new()

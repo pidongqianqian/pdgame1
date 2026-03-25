@@ -29,11 +29,13 @@ func _shoot_projectile() -> void:
 	projectile.collision_layer = 0
 	projectile.collision_mask = 3
 
-	var sprite_node = ColorRect.new()
-	sprite_node.size = Vector2(3, 3)
-	sprite_node.position = Vector2(-1.5, -1.5)
-	sprite_node.color = Color(0.8, 0.8, 0.7)
-	projectile.add_child(sprite_node)
+	var spr = Sprite2D.new()
+	var tex = load("res://assets/sprites/projectiles/arrow_fire.png")
+	if tex:
+		spr.texture = tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.rotation = dir.angle()
+	projectile.add_child(spr)
 
 	var col = CollisionShape2D.new()
 	var shape = CircleShape2D.new()

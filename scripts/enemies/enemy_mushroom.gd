@@ -41,7 +41,7 @@ func _release_spores() -> void:
 	var size = SPORE_RADIUS * 2
 	vfx.size = Vector2(size, size)
 	vfx.position = global_position - Vector2(SPORE_RADIUS, SPORE_RADIUS)
-	vfx.color = Color(0.2, 0.6, 0.1, 0.25)
+	vfx.color = Color(0.6, 0.2, 0.7, 0.3)
 	get_parent().add_child(vfx)
 
 	_apply_spore_damage()

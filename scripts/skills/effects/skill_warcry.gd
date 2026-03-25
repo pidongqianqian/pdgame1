@@ -20,6 +20,7 @@ func execute(player: Player, data: Dictionary) -> void:
 	tween.tween_property(player.sprite, "modulate", Color(1.4, 1.2, 0.6), 0.1)
 	tween.tween_property(player.sprite, "modulate", Color.WHITE, 0.3)
 
+	VfxManager.play_at("fx2_starburst", global_position, "orange", 0.45, 30.0)
 	player._camera_shake(2.0, 0.1)
 
 	await get_tree().create_timer(0.5).timeout

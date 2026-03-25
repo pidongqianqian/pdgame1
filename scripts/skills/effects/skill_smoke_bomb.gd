@@ -18,6 +18,7 @@ func execute(player: Player, data: Dictionary) -> void:
 
 	global_position = player.global_position
 	_create_smoke_visual()
+	VfxManager.play_at("fx2_smoke", global_position, "green", 0.5, 25.0)
 
 	# 隐身：敌人AI无法锁定玩家
 	player.is_invisible = true

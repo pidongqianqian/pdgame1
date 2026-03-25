@@ -21,6 +21,13 @@ var current_dungeon_seed: int = 0
 # Track dead players for game-over check
 var _dead_peers: Array[int] = []
 
+# UDP relay bridge (host only): 每个 channel 对应一个加入者
+# 每项 = { relay_udp: PacketPeerUDP, local_udp: PacketPeerUDP }
+var _relay_bridges: Array[Dictionary] = []
+var _relay_keepalive_timer: float = 0.0
+const RELAY_KEEPALIVE_SEC: float = 5.0
+const MAX_RELAY_CHANNELS: int = 3
+
 
 func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -35,6 +42,14 @@ func _ready() -> void:
 # ══════════════════════════════════════════════════════════════
 
 func create_server() -> Error:
+	# 先清理可能残留的旧连接，释放端口
+	var old_peer = multiplayer.multiplayer_peer
+	if old_peer is ENetMultiplayerPeer:
+		old_peer.close()
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	player_info.clear()
+	_dead_peers.clear()
+
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
 	if err != OK:
@@ -64,6 +79,7 @@ func disconnect_all() -> void:
 		else:
 			CloudRoomAPI.leave_room()
 	is_cloud_room = false
+	stop_relay_bridge()
 	var peer = multiplayer.multiplayer_peer
 	if peer is ENetMultiplayerPeer:
 		peer.close()
@@ -102,6 +118,62 @@ func get_local_ip() -> String:
 		if addr.begins_with("192.168.") or addr.begins_with("10.") or addr.begins_with("172."):
 			return addr
 	return "127.0.0.1"
+
+
+# ══════════════════════════════════════════════════════════════
+# Relay bridge — 主机端将本地 ENet:7777 桥接到云端中继端口
+# ══════════════════════════════════════════════════════════════
+
+func start_relay_bridge(relay_ip: String, base_port: int) -> void:
+	stop_relay_bridge()
+	for i in range(MAX_RELAY_CHANNELS):
+		var tunnel_port: int = base_port + 1 + i
+
+		var relay_udp := PacketPeerUDP.new()
+		relay_udp.bind(0)
+		relay_udp.set_dest_address(relay_ip, tunnel_port)
+		# 立即发送一个包注册 NAT 映射
+		relay_udp.put_packet(PackedByteArray([0]))
+
+		var local_udp := PacketPeerUDP.new()
+		local_udp.bind(0)
+		local_udp.set_dest_address("127.0.0.1", DEFAULT_PORT)
+
+		_relay_bridges.append({
+			"relay_udp": relay_udp,
+			"local_udp": local_udp,
+		})
+	_relay_keepalive_timer = 0.0
+
+
+func stop_relay_bridge() -> void:
+	for bridge in _relay_bridges:
+		bridge["relay_udp"].close()
+		bridge["local_udp"].close()
+	_relay_bridges.clear()
+
+
+func _process(delta: float) -> void:
+	if _relay_bridges.is_empty():
+		return
+	_poll_relay_bridge()
+	_relay_keepalive_timer += delta
+	if _relay_keepalive_timer >= RELAY_KEEPALIVE_SEC:
+		_relay_keepalive_timer = 0.0
+		for bridge in _relay_bridges:
+			bridge["relay_udp"].put_packet(PackedByteArray([0]))
+
+
+func _poll_relay_bridge() -> void:
+	for bridge in _relay_bridges:
+		var r: PacketPeerUDP = bridge["relay_udp"]
+		var l: PacketPeerUDP = bridge["local_udp"]
+		# 中继 → 本地 ENet
+		while r.get_available_packet_count() > 0:
+			l.put_packet(r.get_packet())
+		# 本地 ENet → 中继
+		while l.get_available_packet_count() > 0:
+			r.put_packet(l.get_packet())
 
 
 func set_local_class(cls: int) -> void:

@@ -7,6 +7,50 @@ const InventoryScene = preload("res://scenes/ui/inventory_screen.tscn")
 
 enum DungeonTheme { CRYPT, FOREST, INFERNO, NECROPOLIS }
 
+# 主题装饰物贴图池
+const DECO_TEXTURES = {
+	DungeonTheme.FOREST: [
+		preload("res://assets/sprites/decorations/tree_pine.png"),
+		preload("res://assets/sprites/decorations/pine_tall.png"),
+		preload("res://assets/sprites/decorations/big_green_tree.png"),
+		preload("res://assets/sprites/decorations/tree_small_green.png"),
+		preload("res://assets/sprites/decorations/pl_bush_1.png"),
+		preload("res://assets/sprites/decorations/pl_bush_2.png"),
+		preload("res://assets/sprites/decorations/pl_bush_3.png"),
+		preload("res://assets/sprites/decorations/pl_rock_1.png"),
+		preload("res://assets/sprites/decorations/pl_rock_2.png"),
+		preload("res://assets/sprites/decorations/pl_fern.png"),
+		preload("res://assets/sprites/decorations/pl_flower_red.png"),
+		preload("res://assets/sprites/decorations/pl_flower_blue.png"),
+		preload("res://assets/sprites/decorations/pl_flower_yellow.png"),
+		preload("res://assets/sprites/decorations/pl_flower_pink.png"),
+		preload("res://assets/sprites/decorations/pl_log.png"),
+		preload("res://assets/sprites/decorations/pl_stump.png"),
+		preload("res://assets/sprites/decorations/mushroom_red.png"),
+	],
+	DungeonTheme.CRYPT: [
+		preload("res://assets/sprites/decorations/barrel.png"),
+		preload("res://assets/sprites/decorations/bucket.png"),
+		preload("res://assets/sprites/decorations/bucket_water.png"),
+		preload("res://assets/sprites/decorations/axe.png"),
+	],
+	DungeonTheme.INFERNO: [
+		preload("res://assets/sprites/decorations/lava_rock_1.png"),
+		preload("res://assets/sprites/decorations/lava_rock_2.png"),
+		preload("res://assets/sprites/decorations/lava_glow_rock.png"),
+		preload("res://assets/sprites/decorations/lava_torch.png"),
+		preload("res://assets/sprites/decorations/lava_chest.png"),
+		preload("res://assets/sprites/decorations/lava_chain.png"),
+		preload("res://assets/sprites/decorations/barrel.png"),
+	],
+	DungeonTheme.NECROPOLIS: [
+		preload("res://assets/sprites/decorations/barrel.png"),
+		preload("res://assets/sprites/decorations/bucket.png"),
+		preload("res://assets/sprites/decorations/axe.png"),
+		preload("res://assets/sprites/decorations/bucket_water.png"),
+	],
+}
+
 const THEME_CONFIG = {
 	DungeonTheme.CRYPT: {
 		"name": "石窟深渊",
@@ -22,7 +66,6 @@ const THEME_CONFIG = {
 			preload("res://scenes/enemies/boss_dark_knight.tscn"),
 		],
 		"ambience": Color(0.12, 0.08, 0.18),
-		"tile_modulate": Color(0.75, 0.72, 0.85),
 		"banner_color": Color(0.35, 0.25, 0.55),
 	},
 	DungeonTheme.FOREST: {
@@ -38,8 +81,7 @@ const THEME_CONFIG = {
 		"big_bosses": [
 			preload("res://scenes/enemies/boss_necromancer.tscn"),
 		],
-		"ambience": Color(0.04, 0.16, 0.06),
-		"tile_modulate": Color(0.6, 0.88, 0.55),
+		"ambience": Color(0.03, 0.10, 0.04),
 		"banner_color": Color(0.2, 0.5, 0.15),
 	},
 	DungeonTheme.INFERNO: {
@@ -56,8 +98,7 @@ const THEME_CONFIG = {
 		"big_bosses": [
 			preload("res://scenes/enemies/boss_fire_elemental.tscn"),
 		],
-		"ambience": Color(0.22, 0.06, 0.02),
-		"tile_modulate": Color(0.92, 0.6, 0.45),
+		"ambience": Color(0.18, 0.05, 0.02),
 		"banner_color": Color(0.65, 0.2, 0.05),
 	},
 	DungeonTheme.NECROPOLIS: {
@@ -75,7 +116,6 @@ const THEME_CONFIG = {
 			preload("res://scenes/enemies/boss_dark_knight.tscn"),
 		],
 		"ambience": Color(0.10, 0.06, 0.16),
-		"tile_modulate": Color(0.65, 0.55, 0.8),
 		"banner_color": Color(0.4, 0.15, 0.55),
 	},
 }
@@ -93,6 +133,8 @@ var _skill_select_ui: CanvasLayer = null
 var _skill_pts_btn: Button = null
 
 var _disconnect_ui: CanvasLayer = null
+var _pause_ui: CanvasLayer = null
+var _run_restored: bool = false  # 防止换层时重复恢复存档
 
 # Debug
 var _debug_panel: CanvasLayer = null
@@ -114,9 +156,22 @@ func _ready() -> void:
 	_setup_inventory()
 	_setup_ambience()
 	_spawn_torch_lights()
+	_setup_touch_controls()
 
 
 func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		if inventory_ui and inventory_ui.visible:
+			inventory_ui._on_close()
+			get_viewport().set_input_as_handled()
+		elif _pause_ui == null:
+			_show_pause_menu()
+			get_viewport().set_input_as_handled()
+		else:
+			_hide_pause_menu()
+			get_viewport().set_input_as_handled()
+		return
+
 	if event.is_action_pressed("inventory"):
 		if inventory_ui and not inventory_ui.visible:
 			inventory_ui.open()
@@ -147,15 +202,32 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 	var ts = TileSet.new()
 	ts.tile_size = Vector2i(16, 16)
 
-	var floor_tex = load("res://assets/sprites/tiles/floor.png")
-	var wall_tex  = load("res://assets/sprites/tiles/wall.png")
+	var theme: DungeonTheme = _get_current_theme()
+	var floor_path: String = "res://assets/sprites/tiles/floor.png"
+	var wall_path: String = "res://assets/sprites/tiles/wall.png"
+	match theme:
+		DungeonTheme.FOREST:
+			floor_path = "res://assets/sprites/tiles/floor_forest.png"
+			wall_path = "res://assets/sprites/tiles/wall_forest.png"
+		DungeonTheme.INFERNO:
+			floor_path = "res://assets/sprites/tiles/floor_inferno.png"
+			wall_path = "res://assets/sprites/tiles/wall_inferno.png"
+		DungeonTheme.NECROPOLIS:
+			floor_path = "res://assets/sprites/tiles/floor_necropolis.png"
+			wall_path = "res://assets/sprites/tiles/wall_necropolis.png"
+
+	var floor_tex = load(floor_path)
+	var wall_tex  = load(wall_path)
 	var void_tex  = load("res://assets/sprites/tiles/void.png")
 
+	var floor_variant_count: int = 1
 	if floor_tex:
 		var floor_src = TileSetAtlasSource.new()
 		floor_src.texture = floor_tex
 		floor_src.texture_region_size = Vector2i(16, 16)
-		floor_src.create_tile(Vector2i(0, 0))
+		floor_variant_count = floor_tex.get_width() / 16
+		for i in floor_variant_count:
+			floor_src.create_tile(Vector2i(i, 0))
 		ts.add_source(floor_src, 0)
 
 	ts.add_physics_layer()
@@ -189,6 +261,7 @@ func _create_runtime_tileset(tilemap_layer: TileMapLayer) -> void:
 
 	tilemap_layer.tile_set = ts
 	tilemap_layer.collision_enabled = true
+	dungeon.floor_variant_count = floor_variant_count
 
 
 func _setup_canvas_modulate() -> void:
@@ -203,11 +276,17 @@ func _spawn_player() -> void:
 	# Single-player path (unchanged)
 	if player and is_instance_valid(player):
 		player.position = dungeon.get_spawn_position()
+		player.z_index = 1
 		return
 	player = PlayerScene.instantiate()
 	player.position = dungeon.get_spawn_position()
+	player.z_index = 1
 	entities.add_child(player)
 	GameManager.player_node = player
+	# 恢复存档中的玩家状态（只在首次加载且有存档时执行）
+	if SaveManager.has_active_run() and not _run_restored:
+		_run_restored = true
+		SaveManager.restore_run_to_player(player)
 
 
 func _spawn_all_players() -> void:
@@ -225,11 +304,13 @@ func _spawn_all_players() -> void:
 		var existing: Player = GameManager.player_nodes.get(peer_id) as Player
 		if existing and is_instance_valid(existing):
 			existing.position = spos
+			existing.z_index = 1
 			continue
 
 		var p: Player = PlayerScene.instantiate()
 		p.name = "Player_%d" % peer_id
 		p.position = spos
+		p.z_index = 1
 		p.set_multiplayer_authority(peer_id)
 		p.initial_class = cls
 		entities.add_child(p)
@@ -345,11 +426,52 @@ func _spawn_torch_lights() -> void:
 func _setup_hud() -> void:
 	hud = HUDScene.instantiate()
 	add_child(hud)
+	# 把自身传给 HUD，供桌面暂停按钮回调使用
+	if hud.has_method("set_game_world"):
+		hud.set_game_world(self)
 
 
 func _setup_inventory() -> void:
 	inventory_ui = InventoryScene.instantiate()
 	add_child(inventory_ui)
+
+
+func _setup_touch_controls() -> void:
+	if not (OS.has_feature("android") or OS.has_feature("mobile")):
+		return
+	var touch_scene = load("res://scenes/ui/touch_controls.tscn")
+	if not touch_scene:
+		return
+	var touch: CanvasLayer = touch_scene.instantiate()
+	add_child(touch)
+	# 连接背包按钮
+	var inv_btn: Button = touch.get_node_or_null("InventoryBtn")
+	if inv_btn:
+		inv_btn.pressed.connect(func():
+			if inventory_ui:
+				if inventory_ui.visible:
+					inventory_ui._on_close()
+				else:
+					inventory_ui.open()
+		)
+	# 连接暂停按钮
+	var pause_btn: Button = touch.get_node_or_null("PauseBtn")
+	if pause_btn:
+		pause_btn.pressed.connect(func():
+			if _pause_ui:
+				_hide_pause_menu()
+			else:
+				_show_pause_menu()
+		)
+	# 移除 attack 动作的鼠标左键绑定，防止触摸模拟点击误触发攻击
+	_remove_mouse_from_action("attack")
+
+
+func _remove_mouse_from_action(action: String) -> void:
+	var events := InputMap.action_get_events(action)
+	for event in events:
+		if event is InputEventMouseButton:
+			InputMap.action_erase_event(action, event)
 
 
 func _setup_ambience() -> void:
@@ -469,14 +591,14 @@ func _rpc_show_floor_clear() -> void:
 
 
 const SHOP_POOL = [
-	{"name": "生命药水",   "desc": "恢复 60 点生命",       "cost": 35,  "type": "heal",     "value": 60},
-	{"name": "大生命药水", "desc": "恢复 150 点生命",      "cost": 75,  "type": "heal",     "value": 150},
-	{"name": "力量晶石",   "desc": "攻击力 +10（本局）",   "cost": 80,  "type": "atk",      "value": 10},
-	{"name": "防御符文",   "desc": "防御力 +6（本局）",    "cost": 65,  "type": "def",      "value": 6},
-	{"name": "风之羽",     "desc": "移动速度 +15（本局）", "cost": 55,  "type": "spd",      "value": 15},
-	{"name": "神秘宝箱",   "desc": "随机普通或精良装备",   "cost": 90,  "type": "item",     "value": 1},
-	{"name": "稀有宝箱",   "desc": "随机稀有或史诗装备",   "cost": 160, "type": "item",     "value": 2},
-	{"name": "天赋卷轴",   "desc": "随机获得一个被动天赋", "cost": 100, "type": "talent",   "value": 0},
+	{"name": "生命药水",   "desc": "恢复 60 点生命",       "cost": 35,  "type": "heal",     "value": 60,  "icon": "res://assets/sprites/items/potion_hp.png"},
+	{"name": "大生命药水", "desc": "恢复 150 点生命",      "cost": 75,  "type": "heal",     "value": 150, "icon": "res://assets/sprites/items/potion_hp_large.png"},
+	{"name": "力量晶石",   "desc": "攻击力 +10（本局）",   "cost": 80,  "type": "atk",      "value": 10,  "icon": "res://assets/sprites/items/item_sword_flame.png"},
+	{"name": "防御符文",   "desc": "防御力 +6（本局）",    "cost": 65,  "type": "def",      "value": 6,   "icon": "res://assets/sprites/items/item_shield.png"},
+	{"name": "风之羽",     "desc": "移动速度 +15（本局）", "cost": 55,  "type": "spd",      "value": 15,  "icon": "res://assets/sprites/items/item_boots_wind.png"},
+	{"name": "神秘宝箱",   "desc": "随机普通或精良装备",   "cost": 90,  "type": "item",     "value": 1,   "icon": "res://assets/sprites/items/item_tome.png"},
+	{"name": "稀有宝箱",   "desc": "随机稀有或史诗装备",   "cost": 160, "type": "item",     "value": 2,   "icon": "res://assets/sprites/items/item_tome.png"},
+	{"name": "天赋卷轴",   "desc": "随机获得一个被动天赋", "cost": 100, "type": "talent",   "value": 0,   "icon": "res://assets/sprites/items/scroll.png"},
 ]
 
 
@@ -619,11 +741,26 @@ func _create_shop_item(item: Dictionary, gold_lbl: Label) -> PanelContainer:
 	vbox.add_theme_constant_override("separation", 3)
 	card.add_child(vbox)
 
+	var name_row = HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 3)
+	vbox.add_child(name_row)
+
+	var shop_icon_path: String = item.get("icon", "")
+	if shop_icon_path != "":
+		var shop_tex = load(shop_icon_path)
+		if shop_tex:
+			var shop_icon = TextureRect.new()
+			shop_icon.texture = shop_tex
+			shop_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			shop_icon.custom_minimum_size = Vector2(16, 16)
+			shop_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			name_row.add_child(shop_icon)
+
 	var name_lbl = Label.new()
 	name_lbl.text = item["name"]
 	name_lbl.add_theme_font_size_override("font_size", UITheme.FONT_SIZE_SMALL)
 	name_lbl.add_theme_color_override("font_color", Color(0.9, 0.85, 1.0))
-	vbox.add_child(name_lbl)
+	name_row.add_child(name_lbl)
 
 	var desc_lbl = Label.new()
 	desc_lbl.text = item["desc"]
@@ -763,6 +900,10 @@ func _on_confirm_next_floor() -> void:
 		_floor_clear_ui.queue_free()
 		_floor_clear_ui = null
 
+	# 进入下一层前先存档
+	if not NetworkManager.is_multiplayer_active():
+		SaveManager.save_run()
+
 	if NetworkManager.is_multiplayer_active():
 		if multiplayer.is_server():
 			GameManager.advance_floor()
@@ -800,7 +941,8 @@ func _next_floor() -> void:
 		if not keep:
 			child.queue_free()
 
-	# 重新生成地图
+	# 重新生成地图（主题变化时需要重建瓦片集）
+	_create_runtime_tileset(dungeon.tilemap)
 	var player_count: int = NetworkManager.get_player_count()
 	var seed_val: int = NetworkManager.current_dungeon_seed
 	dungeon.generate(GameManager.current_floor, player_count, seed_val)
@@ -841,6 +983,9 @@ func _on_game_over() -> void:
 		_skill_select_ui.queue_free()
 		_skill_select_ui = null
 	get_tree().paused = false
+	# 死亡时清除当局存档（防止主菜单显示"继续"）
+	if not NetworkManager.is_multiplayer_active():
+		SaveManager.clear_run()
 	await get_tree().create_timer(1.2).timeout
 	_show_game_over_ui()
 
@@ -1055,7 +1200,133 @@ func _on_gameover_menu() -> void:
 	_dismiss_game_over_ui()
 	var main_node = get_tree().current_scene
 	if main_node and main_node.has_method("return_to_title"):
-		main_node.return_to_title()
+		main_node.return_to_title()# ═══════════════════════════════════════════════════════════════
+# 暂停菜单
+# ═══════════════════════════════════════════════════════════════
+
+func _show_pause_menu() -> void:
+	if _pause_ui or get_tree().paused:
+		return
+	# 先自动保存
+	SaveManager.save_run()
+
+	_pause_ui = CanvasLayer.new()
+	_pause_ui.layer = 22
+	_pause_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_pause_ui)  # 必须先加入场景树，再暂停，否则节点也被暂停
+
+	get_tree().paused = true
+
+	# 半透明背景
+	var overlay = ColorRect.new()
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.0, 0.0, 0.0, 0.65)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pause_ui.add_child(overlay)
+
+	# 中心面板
+	var panel = PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.offset_left  = -130
+	panel.offset_right = 130
+	panel.offset_top   = -110
+	panel.offset_bottom = 110
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.04, 0.12, 0.97)
+	sb.border_color = Color(0.5, 0.4, 0.7, 0.9)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(5)
+	sb.set_content_margin_all(20)
+	panel.add_theme_stylebox_override("panel", sb)
+	_pause_ui.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 12)
+	panel.add_child(vbox)
+
+	# 标题
+	var title_lbl = Label.new()
+	title_lbl.text = "游戏暂停"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UITheme.style_label(title_lbl, UITheme.FONT_SIZE_TITLE, Color(0.8, 0.7, 1.0))
+	vbox.add_child(title_lbl)
+
+	# 层数/存档提示
+	var hint_lbl = Label.new()
+	hint_lbl.text = "第 %d 层  —  进度已自动保存" % GameManager.current_floor
+	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UITheme.style_label(hint_lbl, UITheme.FONT_SIZE_SMALL, UITheme.COLORS["text_dim"])
+	vbox.add_child(hint_lbl)
+
+	var sep1 = HSeparator.new()
+	sep1.add_theme_stylebox_override("separator", _make_separator_style())
+	vbox.add_child(sep1)
+
+	# 继续按钮
+	var resume_btn = Button.new()
+	resume_btn.text = "  继续游戏  "
+	resume_btn.custom_minimum_size = Vector2(200, 34)
+	UITheme.style_button(resume_btn, UITheme.FONT_SIZE_BODY)
+	resume_btn.add_theme_color_override("font_color", UITheme.COLORS["text_gold"])
+	resume_btn.add_theme_stylebox_override("normal",
+		_make_gameover_btn_style(Color(0.18, 0.14, 0.04), Color(0.8, 0.65, 0.2)))
+	resume_btn.add_theme_stylebox_override("hover",
+		_make_gameover_btn_style(Color(0.28, 0.22, 0.06), Color(1.0, 0.85, 0.3)))
+	resume_btn.pressed.connect(_hide_pause_menu)
+	vbox.add_child(resume_btn)
+
+	# 返回主菜单按钮
+	var menu_btn = Button.new()
+	menu_btn.text = "  返回主菜单  "
+	menu_btn.custom_minimum_size = Vector2(200, 34)
+	UITheme.style_button(menu_btn, UITheme.FONT_SIZE_BODY)
+	menu_btn.add_theme_stylebox_override("normal",
+		_make_gameover_btn_style(Color(0.12, 0.10, 0.20), Color(0.4, 0.3, 0.6)))
+	menu_btn.add_theme_stylebox_override("hover",
+		_make_gameover_btn_style(Color(0.18, 0.16, 0.28), Color(0.5, 0.4, 0.7)))
+	menu_btn.pressed.connect(func():
+		_hide_pause_menu()
+		var main_node = get_tree().current_scene
+		if main_node and main_node.has_method("return_to_title"):
+			main_node.return_to_title()
+	)
+	vbox.add_child(menu_btn)
+
+	# 退出游戏按钮（手机端隐藏）
+	if not OS.has_feature("android"):
+		var quit_btn = Button.new()
+		quit_btn.text = "  退出游戏  "
+		quit_btn.custom_minimum_size = Vector2(200, 34)
+		UITheme.style_button(quit_btn, UITheme.FONT_SIZE_BODY)
+		quit_btn.add_theme_stylebox_override("normal",
+			_make_gameover_btn_style(Color(0.20, 0.08, 0.08), Color(0.7, 0.25, 0.25)))
+		quit_btn.add_theme_stylebox_override("hover",
+			_make_gameover_btn_style(Color(0.28, 0.12, 0.12), Color(0.9, 0.3, 0.3)))
+		quit_btn.pressed.connect(func(): get_tree().quit())
+		vbox.add_child(quit_btn)
+
+	# 隐藏按钮：捕获 Escape 键关闭暂停菜单（game_world._input 在暂停时不执行）
+	var esc_btn = Button.new()
+	esc_btn.flat = true
+	esc_btn.modulate.a = 0.0
+	esc_btn.focus_mode = Control.FOCUS_NONE
+	esc_btn.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var esc_shortcut = Shortcut.new()
+	var esc_event = InputEventKey.new()
+	esc_event.keycode = KEY_ESCAPE
+	esc_shortcut.events = [esc_event]
+	esc_btn.shortcut = esc_shortcut
+	esc_btn.pressed.connect(_hide_pause_menu)
+	_pause_ui.add_child(esc_btn)
+
+
+func _hide_pause_menu() -> void:
+	if not _pause_ui:
+		return
+	get_tree().paused = false
+	_pause_ui.queue_free()
+	_pause_ui = null
 
 
 # ── 多人模式按钮回调 ──────────────────────────────────────────
@@ -1311,165 +1582,46 @@ func _show_theme_banner() -> void:
 # ═══════════════════════════════════════════════════════════════
 
 func _apply_theme_tilemap_tint() -> void:
-	var config: Dictionary = THEME_CONFIG[_get_current_theme()]
-	var tint: Color = config.get("tile_modulate", Color.WHITE)
 	if dungeon and dungeon.tilemap:
-		dungeon.tilemap.modulate = tint
+		dungeon.tilemap.modulate = Color.WHITE
 
 
-const DECO_DENSITY: int = 5
+const DECO_PER_ROOM_MIN: int = 2
+const DECO_PER_ROOM_MAX: int = 7
 
 func _spawn_room_decorations() -> void:
 	var theme: DungeonTheme = _get_current_theme()
+	var tex_pool: Array = DECO_TEXTURES.get(theme, [])
+	if tex_pool.is_empty():
+		return
+
 	for i in dungeon.rooms.size():
 		var room: Rect2i = dungeon.rooms[i]
-		var count: int = clampi(int(room.get_area() / 18), 1, DECO_DENSITY)
+		var area: int = room.size.x * room.size.y
+		var count: int = clampi(int(area / 12), DECO_PER_ROOM_MIN, DECO_PER_ROOM_MAX)
 		for j in count:
 			var margin: int = 1
 			var tx: int = randi_range(room.position.x + margin, room.end.x - 1 - margin)
 			var ty: int = randi_range(room.position.y + margin, room.end.y - 1 - margin)
 			if not dungeon.is_floor_at(Vector2(tx * 16 + 8, ty * 16 + 8)):
 				continue
-			var world_pos = Vector2(tx * 16 + randf_range(2, 14), ty * 16 + randf_range(2, 14))
-			_place_decoration(world_pos, theme)
+			var world_pos = Vector2(tx * 16 + 8, ty * 16 + 8)
+			_place_deco_sprite(world_pos, tex_pool, theme)
 
 
-func _place_decoration(pos: Vector2, theme: DungeonTheme) -> void:
-	match theme:
-		DungeonTheme.CRYPT:
-			_deco_crypt(pos)
-		DungeonTheme.FOREST:
-			_deco_forest(pos)
-		DungeonTheme.INFERNO:
-			_deco_inferno(pos)
-		DungeonTheme.NECROPOLIS:
-			_deco_necropolis(pos)
+func _place_deco_sprite(pos: Vector2, tex_pool: Array, theme: DungeonTheme) -> void:
+	var tex: Texture2D = tex_pool[randi() % tex_pool.size()]
+	var spr = Sprite2D.new()
+	spr.texture = tex
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.position = pos
+	spr.z_index = 0
 
+	spr.modulate.a = randf_range(0.88, 1.0)
+	if randi() % 3 == 0:
+		spr.flip_h = true
 
-func _deco_crypt(pos: Vector2) -> void:
-	var kind: int = randi() % 3
-	match kind:
-		0:  # 小骨头
-			var bone = _make_deco_sprite(pos, Vector2(5, 2), Color(0.85, 0.82, 0.7, 0.6))
-			bone.rotation = randf_range(-0.5, 0.5)
-		1:  # 蛛网角
-			var web = _make_deco_sprite(pos, Vector2(4, 4), Color(0.8, 0.8, 0.8, 0.25))
-			web.rotation = randf_range(0, TAU)
-		2:  # 碎石
-			var s1 = _make_deco_sprite(pos, Vector2(2, 2), Color(0.45, 0.4, 0.38, 0.5))
-			_make_deco_sprite(pos + Vector2(3, 1), Vector2(1, 1), Color(0.5, 0.45, 0.4, 0.4))
-
-
-func _deco_forest(pos: Vector2) -> void:
-	var kind: int = randi() % 4
-	match kind:
-		0:  # 草丛
-			_make_grass_tuft(pos)
-		1:  # 小蘑菇
-			_make_mushroom_deco(pos)
-		2:  # 藤蔓/苔藓
-			var moss = _make_deco_sprite(pos, Vector2(3, 2), Color(0.2, 0.55, 0.15, 0.5))
-			moss.rotation = randf_range(-0.3, 0.3)
-		3:  # 落叶
-			var leaf = _make_deco_sprite(pos, Vector2(3, 2), Color(0.5, 0.65, 0.2, 0.45))
-			leaf.rotation = randf_range(0, TAU)
-
-
-func _deco_inferno(pos: Vector2) -> void:
-	var kind: int = randi() % 3
-	match kind:
-		0:  # 裂缝/熔岩痕
-			var crack = _make_deco_sprite(pos, Vector2(6, 1), Color(0.9, 0.35, 0.1, 0.55))
-			crack.rotation = randf_range(-0.4, 0.4)
-		1:  # 灰烬
-			for k in 3:
-				var offset = Vector2(randf_range(-3, 3), randf_range(-3, 3))
-				_make_deco_sprite(pos + offset, Vector2(1, 1), Color(0.3, 0.25, 0.2, 0.4))
-		2:  # 小熔岩池
-			_make_lava_pool(pos)
-
-
-func _deco_necropolis(pos: Vector2) -> void:
-	var kind: int = randi() % 3
-	match kind:
-		0:  # 符文痕迹
-			_make_rune_mark(pos)
-		1:  # 暗紫烛光
-			var candle = _make_deco_sprite(pos, Vector2(1, 3), Color(0.7, 0.55, 0.75, 0.55))
-			var glow = _make_deco_sprite(pos + Vector2(0, -2), Vector2(3, 3),
-				Color(0.6, 0.3, 0.8, 0.15))
-		2:  # 裂骨
-			var bone = _make_deco_sprite(pos, Vector2(4, 2), Color(0.6, 0.55, 0.65, 0.45))
-			bone.rotation = randf_range(-0.6, 0.6)
-
-
-func _make_deco_sprite(pos: Vector2, size: Vector2, color: Color) -> ColorRect:
-	var rect = ColorRect.new()
-	rect.size = size
-	rect.color = color
-	rect.position = pos - size * 0.5
-	rect.z_index = -1
-	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	entities.add_child(rect)
-	return rect
-
-
-func _make_grass_tuft(pos: Vector2) -> void:
-	var base_green: float = randf_range(0.35, 0.6)
-	for k in randi_range(2, 4):
-		var offset = Vector2(randf_range(-3, 3), randf_range(-2, 1))
-		var blade = ColorRect.new()
-		blade.size = Vector2(1, randi_range(3, 5))
-		blade.color = Color(0.15 + randf_range(-0.05, 0.05),
-			base_green + randf_range(-0.1, 0.1), 0.1, 0.6)
-		blade.position = pos + offset
-		blade.rotation = randf_range(-0.3, 0.3)
-		blade.z_index = -1
-		entities.add_child(blade)
-
-
-func _make_mushroom_deco(pos: Vector2) -> void:
-	# 菌柄
-	var stem = ColorRect.new()
-	stem.size = Vector2(2, 3)
-	stem.color = Color(0.85, 0.8, 0.65, 0.7)
-	stem.position = pos + Vector2(-1, 0)
-	stem.z_index = -1
-	entities.add_child(stem)
-	# 菌盖
-	var cap = ColorRect.new()
-	var cap_colors = [Color(0.8, 0.2, 0.15, 0.7), Color(0.6, 0.4, 0.1, 0.7),
-		Color(0.3, 0.5, 0.8, 0.7)]
-	cap.size = Vector2(4, 2)
-	cap.color = cap_colors[randi() % cap_colors.size()]
-	cap.position = pos + Vector2(-2, -2)
-	cap.z_index = -1
-	entities.add_child(cap)
-
-
-func _make_lava_pool(pos: Vector2) -> void:
-	var pool = ColorRect.new()
-	pool.size = Vector2(randi_range(4, 7), randi_range(3, 5))
-	pool.color = Color(0.95, 0.4, 0.1, 0.4)
-	pool.position = pos - pool.size * 0.5
-	pool.z_index = -1
-	entities.add_child(pool)
-	var core = ColorRect.new()
-	core.size = pool.size * 0.5
-	core.color = Color(1.0, 0.75, 0.2, 0.5)
-	core.position = pos - core.size * 0.5
-	core.z_index = -1
-	entities.add_child(core)
-
-
-func _make_rune_mark(pos: Vector2) -> void:
-	var color = Color(0.5, 0.25, 0.7, 0.3)
-	# 十字符文
-	_make_deco_sprite(pos, Vector2(5, 1), color)
-	_make_deco_sprite(pos, Vector2(1, 5), color)
-	# 角上小点
-	for corner in [Vector2(-2, -2), Vector2(2, -2), Vector2(-2, 2), Vector2(2, 2)]:
-		_make_deco_sprite(pos + corner, Vector2(1, 1), Color(color.r, color.g, color.b, 0.2))
+	entities.add_child(spr)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1528,6 +1680,7 @@ func _debug_jump_to_floor(target_floor: int) -> void:
 		if not keep:
 			child.queue_free()
 
+	_create_runtime_tileset(dungeon.tilemap)
 	var player_count: int = NetworkManager.get_player_count()
 	var seed_val: int = randi()
 	dungeon.generate(GameManager.current_floor, player_count, seed_val)

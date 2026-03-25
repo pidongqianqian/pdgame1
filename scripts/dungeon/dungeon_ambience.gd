@@ -65,6 +65,10 @@ var _particle_layer: CanvasLayer
 var _theme_color: Color = Color(0.12, 0.08, 0.18)
 var _theme_id: int = 0  # 0=crypt, 1=forest, 2=inferno, 3=necropolis
 
+var _frame_counter: int = 0
+var _cached_canvas_xform: Transform2D
+var _cached_vp_size: Vector2
+
 
 func _ready() -> void:
 	layer = 5
@@ -115,9 +119,9 @@ func _update_floor_theme() -> void:
 		_fog_material.set_shader_parameter("fog_tint", tint)
 		var darkness_scale: float = 1.0 + floor_num * 0.02
 		_fog_material.set_shader_parameter("edge_darkness",
-			clampf(0.50 * darkness_scale, 0.0, 0.65))
+			clampf(0.50 * darkness_scale, 0.0, 0.72))
 		_fog_material.set_shader_parameter("base_darkness",
-			clampf(0.18 + floor_num * 0.015, 0.0, 0.30))
+			clampf(0.18 + floor_num * 0.015, 0.0, 0.35))
 
 
 func _spawn_dust_particles() -> void:
@@ -272,8 +276,16 @@ func _spawn_necro_wisps() -> void:
 
 
 func _process(delta: float) -> void:
-	_animate_dust(delta)
-	_update_torch_shader()
+	_frame_counter += 1
+	# time_val 每帧更新保持火把闪烁流畅
+	if _fog_material:
+		_fog_material.set_shader_parameter("time_val", Time.get_ticks_msec() / 1000.0)
+	# 粒子每 2 帧更新，视觉上无差异但节省一半 CPU
+	if _frame_counter % 2 == 0:
+		_animate_dust(delta * 2.0)
+	# 火把 UV 每 3 帧检查一次，只在摄像机移动时重建
+	if _frame_counter % 3 == 0:
+		_update_torch_shader()
 
 
 func _animate_dust(delta: float) -> void:
@@ -330,8 +342,6 @@ func _animate_dust(delta: float) -> void:
 func _update_torch_shader() -> void:
 	if not _fog_material:
 		return
-	_fog_material.set_shader_parameter("time_val",
-		Time.get_ticks_msec() / 1000.0)
 
 	var viewport = get_viewport()
 	if not viewport:
@@ -339,6 +349,12 @@ func _update_torch_shader() -> void:
 
 	var canvas_xform: Transform2D = viewport.get_canvas_transform()
 	var vp_size: Vector2 = viewport.get_visible_rect().size
+
+	# 只有摄像机真正移动时才重建 UV 数组
+	if canvas_xform == _cached_canvas_xform and vp_size == _cached_vp_size:
+		return
+	_cached_canvas_xform = canvas_xform
+	_cached_vp_size = vp_size
 
 	var uvs := PackedVector2Array()
 	var count: int = 0

@@ -97,10 +97,12 @@ func _shoot_projectile(dir: Vector2) -> void:
 	projectile.collision_layer = 0
 	projectile.collision_mask = 3
 
-	var spr = ColorRect.new()
-	spr.size = Vector2(3, 3)
-	spr.position = Vector2(-1.5, -1.5)
-	spr.color = Color(0.6, 0.7, 1.0)
+	var spr = Sprite2D.new()
+	var tex = load("res://assets/sprites/projectiles/bolt_purple.png")
+	if tex:
+		spr.texture = tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.rotation = dir.angle()
 	projectile.add_child(spr)
 
 	var col = CollisionShape2D.new()

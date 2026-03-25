@@ -60,6 +60,7 @@ func _trigger(enemy: EnemyBase) -> void:
 				(e as EnemyBase).apply_slow(_slow_duration * 0.5, 0.3)
 
 	_spawn_trigger_vfx()
+	VfxManager.play_at("fx_ring_explode", global_position, "green", 0.4, 35.0)
 	if _player and is_instance_valid(_player):
 		_player._camera_shake(2.5, 0.12)
 

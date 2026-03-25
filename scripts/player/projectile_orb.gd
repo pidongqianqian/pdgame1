@@ -19,19 +19,17 @@ func _ready() -> void:
 	_gfx = Node2D.new()
 	add_child(_gfx)
 
-	# 魔法弹精灵
 	var orb_sprite = Sprite2D.new()
-	var staff_tex = load("res://assets/sprites/items/staff.png")
-	if staff_tex:
-		orb_sprite.texture = staff_tex
-		orb_sprite.scale = Vector2(0.7, 0.7)
+	var orb_tex = load("res://assets/sprites/projectiles/orb_blue.png")
+	if orb_tex:
+		orb_sprite.texture = orb_tex
+		orb_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	else:
 		var fallback = ColorRect.new()
 		fallback.size = Vector2(6, 6)
 		fallback.position = Vector2(-3, -3)
 		fallback.color = Color(0.75, 0.40, 1.0, 0.9)
 		_gfx.add_child(fallback)
-	orb_sprite.modulate = Color(0.85, 0.55, 1.0)
 	_gfx.add_child(orb_sprite)
 
 	# 旋转动画

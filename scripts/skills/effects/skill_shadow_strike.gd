@@ -38,6 +38,7 @@ func execute(player: Player, data: Dictionary) -> void:
 
 	# 造成伤害
 	nearest.take_damage(dmg, dir_to_enemy * 2.0)
+	VfxManager.play_at("fx2_wave_slash", global_position, "red", 0.4, 40.0)
 
 	# 出现特效
 	global_position = behind_pos

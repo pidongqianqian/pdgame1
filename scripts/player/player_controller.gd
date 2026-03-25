@@ -31,10 +31,15 @@ var _rogue_hit_timer: float = 0.0
 @onready var camera: Camera2D = $Camera2D
 
 var _idle_texture: Texture2D
+var _walk1_texture: Texture2D
+var _walk2_texture: Texture2D
 var _walk_anim_timer: float = 0.0
-const WALK_ANIM_SPEED = 0.12
+var _walk_frame: int = 0  # 0=idle, 1=walk1, 2=idle, 3=walk2
+const WALK_ANIM_SPEED = 0.15
+const WALK_FRAME_DURATION = 0.12
 
 var _class_color: Color = Color.WHITE
+var _base_sprite_scale: Vector2 = Vector2.ONE
 var _weapon_sprite: Sprite2D
 var _weapon_base_offset: Vector2 = Vector2(6, 0)
 var skill_manager: SkillManager
@@ -79,6 +84,7 @@ func _ready() -> void:
 
 	_load_textures()
 	_apply_class_visuals()
+	_base_sprite_scale = sprite.scale
 	_create_weapon_sprite()
 	_setup_skill_manager()
 
@@ -96,14 +102,17 @@ func _apply_class_visuals() -> void:
 
 func _load_textures() -> void:
 	var cls: int = _get_class()
-	var path_map: Dictionary = {
-		GameManager.PlayerClass.WARRIOR: "res://assets/sprites/player/warrior.png",
-		GameManager.PlayerClass.MAGE:    "res://assets/sprites/player/mage.png",
-		GameManager.PlayerClass.RANGER:  "res://assets/sprites/player/ranger.png",
-		GameManager.PlayerClass.ROGUE:   "res://assets/sprites/player/rogue.png",
+	var name_map: Dictionary = {
+		GameManager.PlayerClass.WARRIOR: "warrior",
+		GameManager.PlayerClass.MAGE:    "mage",
+		GameManager.PlayerClass.RANGER:  "ranger",
+		GameManager.PlayerClass.ROGUE:   "rogue",
 	}
-	var path: String = path_map.get(cls, "res://assets/sprites/player/warrior.png")
-	_idle_texture = load(path)
+	var char_name: String = name_map.get(cls, "warrior")
+	var base_path: String = "res://assets/sprites/player/"
+	_idle_texture = load(base_path + char_name + ".png")
+	_walk1_texture = load(base_path + char_name + "_walk1.png")
+	_walk2_texture = load(base_path + char_name + "_walk2.png")
 	if _idle_texture:
 		sprite.texture = _idle_texture
 
@@ -121,7 +130,7 @@ func _create_weapon_sprite() -> void:
 	var tex = load(tex_path)
 	if tex:
 		_weapon_sprite.texture = tex
-	_weapon_sprite.scale = Vector2(0.7, 0.7)
+	_weapon_sprite.scale = Vector2(0.5, 0.5)
 	add_child(_weapon_sprite)
 	_update_weapon_transform()
 
@@ -159,14 +168,19 @@ func _remote_process(delta: float) -> void:
 
 	if current_state == State.MOVE:
 		_walk_anim_timer += delta
-		var bob: float = sin(_walk_anim_timer / WALK_ANIM_SPEED * PI) * 1.5
-		sprite.position.y = -abs(bob)
-		sprite.scale.x = 1.0 + sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
-		sprite.scale.y = 1.0 - sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
+		_update_walk_frame()
+		var phase: float = _walk_anim_timer / WALK_ANIM_SPEED
+		sprite.position.y = -abs(sin(phase * PI)) * 1.5
+		sprite.scale = _base_sprite_scale
+		sprite.rotation = 0.0
 	elif current_state == State.IDLE:
 		sprite.position = Vector2.ZERO
-		sprite.scale = Vector2.ONE
+		sprite.scale = _base_sprite_scale
+		sprite.rotation = 0.0
 		_walk_anim_timer = 0.0
+		_walk_frame = -1
+		if _idle_texture:
+			sprite.texture = _idle_texture
 	elif current_state == State.DEAD:
 		if prev_state != State.DEAD:
 			sprite.modulate = Color(0.5, 0.1, 0.1, 0.3)
@@ -222,8 +236,8 @@ func _play_remote_attack_effects() -> void:
 		GameManager.PlayerClass.MAGE:
 			_animate_weapon_thrust(0.2)
 			var tw = create_tween()
-			tw.tween_property(sprite, "scale", Vector2(1.2, 1.2), 0.06)
-			tw.tween_property(sprite, "scale", Vector2(1.0, 1.0), 0.08)
+			tw.tween_property(sprite, "scale", _base_sprite_scale * 1.2, 0.06)
+			tw.tween_property(sprite, "scale", _base_sprite_scale, 0.08)
 			_spawn_remote_projectile(facing_direction, Color(0.5, 0.3, 1.0, 0.9), 90.0)
 		GameManager.PlayerClass.RANGER:
 			_animate_weapon_thrust(0.18)
@@ -269,22 +283,22 @@ func _update_weapon_transform() -> void:
 	if abs(facing_direction.x) >= abs(facing_direction.y):
 		if facing_direction.x >= 0:
 			offset = Vector2(7, 1)
-			rot = deg_to_rad(-45)
+			rot = 0.0
 			_weapon_sprite.flip_h = false
 			_weapon_sprite.z_index = 1
 		else:
 			offset = Vector2(-7, 1)
-			rot = deg_to_rad(45)
+			rot = 0.0
 			_weapon_sprite.flip_h = true
 			_weapon_sprite.z_index = 1
 	else:
 		if facing_direction.y > 0:
 			offset = Vector2(5, 4)
-			rot = deg_to_rad(-20)
+			rot = deg_to_rad(25)
 			_weapon_sprite.z_index = 1
 		else:
 			offset = Vector2(-5, -2)
-			rot = deg_to_rad(30)
+			rot = deg_to_rad(75)
 			_weapon_sprite.z_index = -1
 
 	if cls == GameManager.PlayerClass.MAGE:
@@ -345,7 +359,10 @@ func _get_input_direction() -> Vector2:
 func _state_idle() -> void:
 	velocity = Vector2.ZERO
 	sprite.position = Vector2.ZERO
-	sprite.scale = Vector2.ONE
+	sprite.scale = _base_sprite_scale
+	sprite.rotation = 0.0
+	_walk_anim_timer = 0.0
+	_walk_frame = -1
 	if _idle_texture:
 		sprite.texture = _idle_texture
 	var dir = _get_input_direction()
@@ -380,12 +397,12 @@ func _state_move(delta: float) -> void:
 
 	velocity = dir * stats.get_total_speed()
 
-	# 弹跳走路动画
 	_walk_anim_timer += delta
-	var bob: float = sin(_walk_anim_timer / WALK_ANIM_SPEED * PI) * 1.5
-	sprite.position.y = -abs(bob)
-	sprite.scale.x = 1.0 + sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
-	sprite.scale.y = 1.0 - sin(_walk_anim_timer / WALK_ANIM_SPEED * TAU) * 0.04
+	_update_walk_frame()
+	var phase: float = _walk_anim_timer / WALK_ANIM_SPEED
+	sprite.position.y = -abs(sin(phase * PI)) * 1.5
+	sprite.scale = _base_sprite_scale
+	sprite.rotation = 0.0
 
 	if Input.is_action_just_pressed("attack") and _attack_cooldown_timer <= 0:
 		_start_attack()
@@ -395,6 +412,22 @@ func _state_move(delta: float) -> void:
 		return
 	_check_skill_input()
 	_update_sprite_direction()
+
+
+func _update_walk_frame() -> void:
+	var new_frame: int = int(_walk_anim_timer / WALK_FRAME_DURATION) % 4
+	if new_frame == _walk_frame:
+		return
+	_walk_frame = new_frame
+	match _walk_frame:
+		0, 2:
+			sprite.texture = _idle_texture
+		1:
+			if _walk1_texture:
+				sprite.texture = _walk1_texture
+		3:
+			if _walk2_texture:
+				sprite.texture = _walk2_texture
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -420,7 +453,8 @@ func _attack_warrior() -> void:
 	_attack_timer = stats.attack_cooldown
 	velocity = facing_direction * 3.0
 	sprite.position = Vector2.ZERO
-	sprite.scale = Vector2.ONE
+	sprite.scale = _base_sprite_scale
+	sprite.rotation = 0.0
 
 	attack_area.position = facing_direction * 12
 	var rect = attack_shape.shape as RectangleShape2D
@@ -434,8 +468,11 @@ func _attack_warrior() -> void:
 	_camera_shake(2.5, 0.12)
 
 	var tween = create_tween()
-	tween.tween_property(sprite, "position", facing_direction * 3.0, 0.06)
-	tween.tween_property(sprite, "position", Vector2.ZERO, 0.12)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(1.25, 0.8), 0.05)
+	tween.parallel().tween_property(sprite, "position", facing_direction * 5.0, 0.05)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(0.9, 1.1), 0.06)
+	tween.parallel().tween_property(sprite, "position", Vector2.ZERO, 0.1)
+	tween.tween_property(sprite, "scale", _base_sprite_scale, 0.06)
 
 	_deal_attack_damage(stats.get_total_attack(), 1.5)
 	_attack_cooldown_timer = stats.attack_cooldown
@@ -444,9 +481,15 @@ func _attack_warrior() -> void:
 # ── 法师：发射追踪魔法弹 ──────────────────────────────────────
 func _attack_mage() -> void:
 	_attack_cooldown_timer = stats.attack_cooldown
+	sprite.rotation = 0.0
+
 	var tween = create_tween()
-	tween.tween_property(sprite, "scale", Vector2(1.2, 1.2), 0.06)
-	tween.tween_property(sprite, "scale", Vector2(1.0, 1.0), 0.08)
+	tween.tween_property(sprite, "position", -facing_direction * 2.0, 0.04)
+	tween.parallel().tween_property(sprite, "scale", _base_sprite_scale * Vector2(0.85, 1.15), 0.04)
+	tween.tween_property(sprite, "position", facing_direction * 2.0, 0.06)
+	tween.parallel().tween_property(sprite, "scale", _base_sprite_scale * 1.2, 0.06)
+	tween.tween_property(sprite, "position", Vector2.ZERO, 0.08)
+	tween.parallel().tween_property(sprite, "scale", _base_sprite_scale, 0.08)
 
 	_animate_weapon_thrust(0.2)
 	_spawn_magic_orb(facing_direction, stats.get_total_attack())
@@ -474,10 +517,15 @@ func _spawn_magic_orb(dir: Vector2, dmg: int) -> void:
 # ── 游侠：射出穿透长箭 ────────────────────────────────────────
 func _attack_ranger() -> void:
 	_attack_cooldown_timer = stats.attack_cooldown
+	sprite.rotation = 0.0
 
 	var tween = create_tween()
-	tween.tween_property(sprite, "position", -facing_direction * 1.5, 0.05)
-	tween.tween_property(sprite, "position", Vector2.ZERO, 0.08)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(0.85, 1.1), 0.04)
+	tween.parallel().tween_property(sprite, "position", -facing_direction * 2.5, 0.04)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(1.15, 0.9), 0.04)
+	tween.parallel().tween_property(sprite, "position", facing_direction * 1.0, 0.04)
+	tween.tween_property(sprite, "scale", _base_sprite_scale, 0.06)
+	tween.parallel().tween_property(sprite, "position", Vector2.ZERO, 0.06)
 
 	_animate_weapon_thrust(0.18)
 	_spawn_arrow(facing_direction, stats.get_total_attack())
@@ -508,7 +556,15 @@ func _attack_rogue() -> void:
 	_attack_timer = stats.attack_cooldown * 0.7
 	velocity = facing_direction * 5.0
 	sprite.position = Vector2.ZERO
-	sprite.scale = Vector2.ONE
+	sprite.scale = _base_sprite_scale
+	sprite.rotation = 0.0
+
+	var atk_tw = create_tween()
+	atk_tw.tween_property(sprite, "scale", _base_sprite_scale * Vector2(1.3, 0.75), 0.03)
+	atk_tw.parallel().tween_property(sprite, "position", facing_direction * 4.0, 0.03)
+	atk_tw.tween_property(sprite, "scale", _base_sprite_scale * Vector2(0.9, 1.1), 0.05)
+	atk_tw.parallel().tween_property(sprite, "position", Vector2.ZERO, 0.08)
+	atk_tw.tween_property(sprite, "scale", _base_sprite_scale, 0.05)
 
 	var left_offset = Vector2(-facing_direction.y, facing_direction.x) * 5
 	attack_area.position = facing_direction * 12 + left_offset
@@ -534,21 +590,9 @@ func _attack_rogue() -> void:
 	_freeze_frame(0.03)
 
 
-func _spawn_rogue_slash(offset: Vector2, color: Color) -> void:
-	var slash = Node2D.new()
-	slash.position = facing_direction * 10 + offset
-	add_child(slash)
-	for i in 4:
-		var line = ColorRect.new()
-		var angle = deg_to_rad(-30 + i * 20) + facing_direction.angle()
-		line.size = Vector2(7, 1)
-		line.position = Vector2(cos(angle) * 3, sin(angle) * 3)
-		line.rotation = angle
-		line.color = Color(color.r, color.g, color.b, 1.0 - i * 0.15)
-		slash.add_child(line)
-	var tween = create_tween()
-	tween.tween_property(slash, "modulate:a", 0.0, 0.15)
-	tween.tween_callback(slash.queue_free)
+func _spawn_rogue_slash(offset: Vector2, _color: Color) -> void:
+	var slash_pos: Vector2 = global_position + facing_direction * 10 + offset
+	VfxManager.play_at("fx_slash", slash_pos, "orange", 0.3, 45.0)
 
 
 # ─── 共用攻击伤害结算 ─────────────────────────────────────────
@@ -579,27 +623,20 @@ func _deal_attack_damage(dmg: int, knockback_mult: float = 1.0) -> void:
 
 
 func _spawn_warrior_slash() -> void:
-	var slash = Node2D.new()
-	slash.position = facing_direction * 14
-	slash.rotation = facing_direction.angle()
-	add_child(slash)
-	# 宽弧：7条线覆盖140°
-	for i in 7:
-		var line = ColorRect.new()
-		var angle = deg_to_rad(-70 + i * 23)
-		line.size = Vector2(10, 2)
-		line.position = Vector2(cos(angle) * 5, sin(angle) * 5)
-		line.rotation = angle
-		line.color = Color(0.7, 0.85, 1.0, 1.0 - i * 0.08)
-		slash.add_child(line)
-	var tween = create_tween()
-	tween.tween_property(slash, "modulate:a", 0.0, 0.25)
-	tween.parallel().tween_property(slash, "scale", Vector2(1.4, 1.4), 0.25)
-	tween.tween_callback(slash.queue_free)
+	var slash_pos: Vector2 = global_position + facing_direction * 12
+	VfxManager.play_at("fx_spiral", slash_pos, "red", 0.4, 35.0)
 
 
 func _state_attack(delta: float) -> void:
 	_attack_timer -= delta
+	# 攻击期间仍允许移动（不锁方向），只是速度减半
+	var dir = _get_input_direction()
+	if dir != Vector2.ZERO:
+		velocity = dir * stats.get_total_speed() * 0.5
+		facing_direction = dir
+		_update_sprite_direction()
+	else:
+		velocity = velocity.move_toward(Vector2.ZERO, 300 * delta)
 	if _attack_timer <= 0:
 		attack_area.monitoring = false
 		attack_shape.disabled = true
@@ -630,8 +667,8 @@ func _dodge_warrior() -> void:
 
 	sprite.modulate = Color(_class_color.r * 0.7, _class_color.g * 0.7, _class_color.b * 0.7, 0.5)
 	var tween = create_tween()
-	tween.tween_property(sprite, "scale", Vector2(0.8, 1.2), 0.05)
-	tween.tween_property(sprite, "scale", Vector2(1, 1), 0.1)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(0.8, 1.2), 0.05)
+	tween.tween_property(sprite, "scale", _base_sprite_scale, 0.1)
 	_spawn_dodge_afterimage(_class_color)
 
 
@@ -659,22 +696,7 @@ func _dodge_mage() -> void:
 
 
 func _spawn_blink_effect(pos: Vector2) -> void:
-	var fx = Node2D.new()
-	fx.global_position = pos
-	get_parent().add_child(fx)
-	for i in 8:
-		var p = ColorRect.new()
-		p.size = Vector2(2, 2)
-		var angle = TAU / 8 * i
-		p.position = Vector2(cos(angle) * 6, sin(angle) * 6)
-		p.color = Color(0.8, 0.5, 1.0, 0.9)
-		fx.add_child(p)
-		var tw = create_tween()
-		tw.tween_property(p, "position", p.position * 2.5, 0.2)
-		tw.parallel().tween_property(p, "modulate:a", 0.0, 0.2)
-	var tw2 = create_tween()
-	tw2.tween_interval(0.25)
-	tw2.tween_callback(fx.queue_free)
+	VfxManager.play_at("fx_ring_expand", pos, "cyan", 0.35, 40.0)
 
 
 # ── 游侠：快速侧步（保持速度） ───────────────────────────────
@@ -703,8 +725,8 @@ func _dodge_rogue() -> void:
 
 	sprite.modulate = Color(0.2, 0.2, 0.2, 0.3)
 	var tween = create_tween()
-	tween.tween_property(sprite, "scale", Vector2(1.3, 0.7), 0.04)
-	tween.tween_property(sprite, "scale", Vector2(1.0, 1.0), 0.08)
+	tween.tween_property(sprite, "scale", _base_sprite_scale * Vector2(1.3, 0.7), 0.04)
+	tween.tween_property(sprite, "scale", _base_sprite_scale, 0.08)
 
 	_spawn_dodge_afterimage(Color(1.0, 0.4, 0.2, 0.6))
 	_rogue_dash_damage()
@@ -741,6 +763,7 @@ func _spawn_dodge_afterimage(color: Color = Color(0.5, 0.7, 1.0, 0.5)) -> void:
 	ghost.texture = sprite.texture
 	ghost.global_position = global_position
 	ghost.flip_h = sprite.flip_h
+	ghost.scale = sprite.scale
 	ghost.modulate = color
 	ghost.z_index = -1
 	get_parent().add_child(ghost)
@@ -793,6 +816,7 @@ func _apply_damage(amount: int, knockback_dir: Vector2) -> void:
 	current_state = State.HURT
 	_hurt_timer = 0.2
 
+	VfxManager.play_at("fx_burst", global_position, "red", 0.3, 40.0)
 	_camera_shake(3.0, 0.15)
 	sprite.modulate = Color(1.5, 0.5, 0.5, 1.0)
 	_show_damage_number(actual)
@@ -894,35 +918,14 @@ func _animate_weapon_thrust(duration: float) -> void:
 # ═══════════════════════════════════════════════════════════════
 
 func _spawn_hit_effect(pos: Vector2) -> void:
-	var cls_color = _class_color
-	var effect = Node2D.new()
-	effect.global_position = pos
-	effect.z_index = 50
-	get_parent().add_child(effect)
-
-	for i in 6:
-		var particle = ColorRect.new()
-		particle.size = Vector2(2, 2)
-		particle.position = Vector2(-1, -1)
-		var angle = randf() * TAU
-		var dist = randf_range(2, 6)
-		particle.color = [Color.WHITE, cls_color, Color(1, 0.9, 0.4)][randi() % 3]
-		effect.add_child(particle)
-		var tween = create_tween()
-		var target_pos = Vector2(cos(angle) * dist, sin(angle) * dist)
-		tween.tween_property(particle, "position", target_pos, 0.2)
-		tween.parallel().tween_property(particle, "modulate:a", 0.0, 0.2)
-
-	var flash = ColorRect.new()
-	flash.size = Vector2(6, 6)
-	flash.position = Vector2(-3, -3)
-	flash.color = Color(1, 1, 1, 0.8)
-	effect.add_child(flash)
-
-	var flash_tween = create_tween()
-	flash_tween.tween_property(flash, "scale", Vector2(2.5, 2.5), 0.08)
-	flash_tween.parallel().tween_property(flash, "modulate:a", 0.0, 0.12)
-	flash_tween.tween_callback(effect.queue_free)
+	var color_map: Dictionary = {
+		GameManager.PlayerClass.WARRIOR: "red",
+		GameManager.PlayerClass.MAGE: "cyan",
+		GameManager.PlayerClass.RANGER: "green",
+		GameManager.PlayerClass.ROGUE: "orange",
+	}
+	var fx_color: String = color_map.get(_get_class(), "orange")
+	VfxManager.play_at("fx_burst", pos, fx_color, 0.35, 40.0)
 
 
 func _camera_shake(intensity: float, duration: float) -> void:
